@@ -108,6 +108,9 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [requestsError, setRequestsError] = useState<string | null>(null);
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectConfirmId, setRejectConfirmId] = useState<string | null>(null);
+  const [rejectedBookingIds, setRejectedBookingIds] = useState<Set<string>>(new Set());
   const [acceptedBooking, setAcceptedBooking] = useState<BookingRequest | null>(null);
   const [providerMissing, setProviderMissing] = useState(false);
   const [onMyWayUpdating, setOnMyWayUpdating] = useState(false);
@@ -187,8 +190,23 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       setRequestsError(t('provider.errLoadPending'));
       return;
     }
-    setRequests((data as BookingRequest[]) ?? []);
-  }, [profile]);
+    const allRequests = (data as BookingRequest[]) ?? [];
+
+    // Load this provider's persisted rejections so rejected bookings stay
+    // hidden across refresh, logout/login, and app restart.
+    let rejectedIds = new Set<string>();
+    if (providerProfileId) {
+      const { data: rejections, error: rejError } = await supabase
+        .from('booking_rejections')
+        .select('booking_id')
+        .eq('provider_id', providerProfileId);
+      if (!rejError && rejections) {
+        rejectedIds = new Set(rejections.map(r => (r as { booking_id: string }).booking_id));
+      }
+    }
+    setRejectedBookingIds(rejectedIds);
+    setRequests(allRequests.filter(r => !rejectedIds.has(r.id)));
+  }, [profile, providerProfileId, t]);
 
   const fetchData = async (): Promise<string | null> => {
     if (!profile) return null;
@@ -1263,6 +1281,41 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     }
   };
 
+  const handleReject = async (bookingId: string) => {
+    if (!profile || !providerProfileId || rejectingId) return;
+    setRejectingId(bookingId);
+    try {
+      const { error } = await supabase
+        .from('booking_rejections')
+        .insert({ booking_id: bookingId, provider_id: providerProfileId });
+      if (error) {
+        // 23505 = unique_violation — already rejected, treat as success.
+        if (error.code !== '23505') {
+          console.error('[reject] insert failed:', {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+          });
+          showToast(t('provider.errRejectFailed'), 'error');
+          setRejectingId(null);
+          return;
+        }
+      }
+      // Only remove the card after the DB write succeeds.
+      setRejectedBookingIds(prev => new Set(prev).add(bookingId));
+      setRequests(prev => prev.filter(r => r.id !== bookingId));
+      showToast(t('provider.successRejected'), 'success');
+    } catch (err) {
+      const e = err as { message?: string };
+      console.error('[reject] unexpected error:', e?.message);
+      showToast(t('provider.errRejectFailed'), 'error');
+    } finally {
+      setRejectingId(null);
+      setRejectConfirmId(null);
+    }
+  };
+
   const handleLogout = async () => {
     setShowLogout(false);
     await signOut();
@@ -1835,6 +1888,21 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
                     >
                       <Text style={styles.previewLocationBtnText}>{t('provider.previewLocation')}</Text>
                     </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.rejectBtn,
+                        rejectingId === req.id && styles.rejectBtnDisabled,
+                      ]}
+                      onPress={() => setRejectConfirmId(req.id)}
+                      disabled={rejectingId !== null}
+                      activeOpacity={0.85}
+                    >
+                      {rejectingId === req.id ? (
+                        <Text style={styles.rejectBtnText}>{t('provider.rejecting')}</Text>
+                      ) : (
+                        <Text style={styles.rejectBtnText}>{t('provider.rejectBooking')}</Text>
+                      )}
+                    </TouchableOpacity>
                   </View>
                 ))}
               </View>
@@ -1892,6 +1960,17 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         confirmLabel={t('provider.logoutConfirm')}
         cancelLabel={t('provider.logoutCancel')}
         onConfirm={handleLogout}
+        confirmVariant="danger"
+      />
+
+      <Modal
+        visible={!!rejectConfirmId}
+        onClose={() => setRejectConfirmId(null)}
+        title={t('provider.rejectConfirmTitle')}
+        message={t('provider.rejectConfirmMessage')}
+        confirmLabel={t('provider.rejectConfirmConfirm')}
+        cancelLabel={t('provider.rejectConfirmCancel')}
+        onConfirm={() => rejectConfirmId && handleReject(rejectConfirmId)}
         confirmVariant="danger"
       />
 
@@ -2597,6 +2676,21 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontSize: 14,
     fontWeight: '700',
+  },
+  rejectBtn: {
+    backgroundColor: 'transparent',
+    borderRadius: radii.lg,
+    paddingVertical: spacing.sm + 2,
+    alignItems: 'center',
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.error + '60',
+  },
+  rejectBtnDisabled: { opacity: 0.5 },
+  rejectBtnText: {
+    color: colors.error,
+    fontSize: 14,
+    fontWeight: '600',
   },
   locationPreviewSubtitle: {
     ...typography.bodySmall,
