@@ -932,12 +932,16 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // a date/time always pass (no conflict detectable).
   const visibleRequests = useMemo(() => {
     if (!acceptedBooking) return requests;
+    // Only apply conflict filtering when the job is in an active (non-terminal)
+    // state. A completed job must not block new booking requests from appearing.
+    const jobStatus = activeJob?.status ?? 'accepted';
+    if (!ACTIVE_STATUSES.includes(jobStatus)) return requests;
     const activeSlots: ActiveBooking[] = [{
       id: acceptedBooking.id,
       booking_date: acceptedBooking.booking_date ?? null,
       booking_time: acceptedBooking.booking_time ?? null,
       service_name: acceptedBooking.services?.name ?? null,
-      status: 'accepted',
+      status: jobStatus,
     }];
     return requests.filter(req =>
       !hasConflict(
@@ -949,7 +953,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         activeSlots,
       )
     );
-  }, [requests, acceptedBooking]);
+  }, [requests, acceptedBooking, activeJob]);
 
   // After Photo visibility: only when the job is started, belongs to this
   // partner, and a before photo already exists.
