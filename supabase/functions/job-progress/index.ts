@@ -678,7 +678,7 @@ Deno.serve(async (req: Request) => {
     if (action === "get_state") {
       const { data: jobRow, error: jobRowError } = await supabase
         .from("jobs")
-        .select("id, status, provider_id, before_photo_url, after_photo_url")
+        .select("id, status, provider_id, before_photo_url, after_photo_url, provider_closed_at")
         .eq("booking_id", booking_id)
         .maybeSingle();
 
@@ -707,6 +707,88 @@ Deno.serve(async (req: Request) => {
           provider_id: jobRow.provider_id,
           before_photo_url: jobRow.before_photo_url,
           after_photo_url: jobRow.after_photo_url,
+          provider_closed_at: jobRow.provider_closed_at,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // ============================================================
+    // close_job: provider acknowledges a customer-approved completed
+    // job and clears it from their dashboard. Only allowed when the
+    // job status is "completed" and the booking is still assigned to
+    // this provider. Sets provider_closed_at to now. Does NOT change
+    // job.status, booking.status, or any photo/approval/evidence data.
+    // ============================================================
+    if (action === "close_job") {
+      const { data: closeJob, error: closeJobError } = await supabase
+        .from("jobs")
+        .select("id, status, provider_id, provider_closed_at")
+        .eq("booking_id", booking_id)
+        .maybeSingle();
+
+      if (closeJobError || !closeJob) {
+        return new Response(
+          JSON.stringify({ error: "Job not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      if (closeJob.provider_id !== providerProfile.id) {
+        return new Response(
+          JSON.stringify({ error: "This job is not assigned to you" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      if (closeJob.status !== "completed") {
+        return new Response(
+          JSON.stringify({ error: `Job status is ${closeJob.status}, expected completed` }),
+          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      // Idempotent: if already closed, succeed without re-stamping.
+      if (closeJob.provider_closed_at) {
+        return new Response(
+          JSON.stringify({ success: true, job_id: closeJob.id, provider_closed_at: closeJob.provider_closed_at }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const closedAt = new Date().toISOString();
+      const { error: closeUpdateError } = await supabase
+        .from("jobs")
+        .update({ provider_closed_at: closedAt })
+        .eq("id", closeJob.id);
+
+      if (closeUpdateError) {
+        return new Response(
+          JSON.stringify({
+            error: "Failed to close job",
+            details: closeUpdateError.message,
+            code: closeUpdateError.code,
+          }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Re-fetch to confirm.
+      const { data: confirmedClosed, error: confirmCloseError } = await supabase
+        .from("jobs")
+        .select("id, provider_closed_at")
+        .eq("id", closeJob.id)
+        .maybeSingle();
+
+      if (confirmCloseError || !confirmedClosed || !confirmedClosed.provider_closed_at) {
+        return new Response(
+          JSON.stringify({ error: "Close could not be verified" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          job_id: closeJob.id,
+          provider_closed_at: confirmedClosed.provider_closed_at,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );

@@ -129,6 +129,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     provider_id: string;
     before_photo_url: string | null;
     after_photo_url: string | null;
+    provider_closed_at: string | null;
   } | null>(null);
 
   // The provider_profiles.id for the authenticated user — jobs.provider_id
@@ -154,6 +155,9 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // Customer Approved state — set when the job transitions to "completed"
   // after the customer approves. Driven by polling get_state.
   const [customerApproved, setCustomerApproved] = useState(false);
+
+  // Closing a customer-approved completed job.
+  const [closingJob, setClosingJob] = useState(false);
 
   const fetchRequests = useCallback(async () => {
     if (!profile) return;
@@ -276,7 +280,15 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         provider_id?: string;
         before_photo_url?: string | null;
         after_photo_url?: string | null;
+        provider_closed_at?: string | null;
       } | null;
+      // If the completed job was already closed by this provider, do not
+      // rebuild the active-job card — it must stay cleared across refreshes.
+      if (job?.id && job.status === 'completed' && job.provider_closed_at) {
+        setAcceptedBooking(null);
+        setActiveJob(null);
+        return;
+      }
       if (job?.id) {
         setActiveJob({
           id: job.id,
@@ -284,6 +296,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           provider_id: job.provider_id ?? '',
           before_photo_url: job.before_photo_url ?? null,
           after_photo_url: job.after_photo_url ?? null,
+          provider_closed_at: job.provider_closed_at ?? null,
         });
         const st = job.status ?? '';
         if (['on_the_way', 'arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
@@ -776,6 +789,41 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     }, 8000);
     return () => clearInterval(interval);
   }, [acceptedBooking, sendApprovalDone, customerApproved, showToast]);
+
+  // handleCloseCompletedJob: Washer acknowledges a customer-approved
+  // completed job and clears it from the dashboard. Persisted via the
+  // job-progress edge function (sets jobs.provider_closed_at). The booking
+  // stays "accepted" and the job stays "completed" — no data is deleted.
+  const handleCloseCompletedJob = useCallback(async () => {
+    if (!acceptedBooking || closingJob || !customerApproved) return;
+    setClosingJob(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('job-progress', {
+        body: { booking_id: acceptedBooking.id, action: 'close_job' },
+      });
+      if (error || !data) {
+        const err = error as { message?: string } | null;
+        console.error('[close-job] failed:', err?.message);
+        showToast(t('provider.errCloseJob'), 'error');
+        return;
+      }
+      // Only clear local state after the DB write succeeds.
+      setAcceptedBooking(null);
+      setActiveJob(null);
+      setCustomerApproved(false);
+      setSendApprovalDone(false);
+      showToast(t('provider.successJobClosed'), 'success');
+      // Refresh pending booking requests so the dashboard returns to
+      // its normal state.
+      fetchRequests();
+    } catch (err) {
+      const e = err as { message?: string };
+      console.error('[close-job] unexpected error:', e?.message);
+      showToast(t('provider.errCloseJob'), 'error');
+    } finally {
+      setClosingJob(false);
+    }
+  }, [acceptedBooking, closingJob, customerApproved, showToast]);
 
   const handlePickPhoto = async () => {
     setPhotoError(null);
@@ -1588,6 +1636,16 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
                 <Text style={styles.customerApprovedText}>
                   {t('provider.customerApprovedBody')}
                 </Text>
+                <TouchableOpacity
+                  style={[styles.closeJobBtn, closingJob && styles.closeJobBtnDisabled]}
+                  onPress={handleCloseCompletedJob}
+                  disabled={closingJob}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.closeJobBtnText}>
+                    {closingJob ? t('provider.closingJob') : t('provider.closeJob')}
+                  </Text>
+                </TouchableOpacity>
               </View>
             )}
 
@@ -2412,6 +2470,19 @@ const styles = StyleSheet.create({
     ...typography.bodySmall,
     color: colors.textSecondary,
     textAlign: 'center',
+  },
+  closeJobBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radii.lg,
+    paddingVertical: spacing.md - 2,
+    alignItems: 'center',
+    marginTop: spacing.md,
+  },
+  closeJobBtnDisabled: { opacity: 0.6 },
+  closeJobBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
   },
   section: { marginBottom: spacing.xl },
   sectionTitle: { ...typography.h4, marginBottom: spacing.md },
