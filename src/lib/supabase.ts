@@ -14,6 +14,7 @@ export type NotificationType = 'booking' | 'job' | 'payment' | 'system';
 
 export interface Profile {
   id: string;
+  wishwash_id: string;
   full_name: string | null;
   email: string | null;
   phone: string | null;

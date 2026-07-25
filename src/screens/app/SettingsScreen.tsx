@@ -16,9 +16,22 @@ interface SettingsScreenProps {
 export function SettingsScreen({ onBack, onSignOut }: SettingsScreenProps) {
   const { t, locale, setLocale } = useTranslation();
   const { permission, notificationsEnabled, setNotificationsEnabled, requestPermission } = useNotifications();
-  const { session, emailVerified, resendVerification } = useAuth();
+  const { session, emailVerified, resendVerification, profile } = useAuth();
   const { showToast } = useToast();
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [copiedId, setCopiedId] = useState(false);
+
+  const handleCopyId = async () => {
+    if (!profile?.wishwash_id) return;
+    try {
+      await navigator.clipboard.writeText(profile.wishwash_id);
+      setCopiedId(true);
+      showToast(t('settings.wishwashIdCopied'), 'success');
+      setTimeout(() => setCopiedId(false), 2000);
+    } catch {
+      showToast(t('settings.wishwashIdCopyFailed'), 'error');
+    }
+  };
 
   const handleResend = async () => {
     if (!session?.user?.email || resendCooldown > 0) return;
@@ -127,6 +140,25 @@ export function SettingsScreen({ onBack, onSignOut }: SettingsScreenProps) {
           {t('settings.accountSection')}
         </Text>
         <View style={styles.card}>
+          <View style={styles.notificationRow}>
+            <View style={styles.notificationInfo}>
+              <Text style={styles.notificationLabel}>{t('settings.wishwashIdLabel')}</Text>
+              <Text style={styles.wishwashIdValue}>
+                {profile?.wishwash_id ?? '—'}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.copyBtn, copiedId && styles.copyBtnDone]}
+              onPress={handleCopyId}
+              activeOpacity={0.7}
+              disabled={!profile?.wishwash_id}
+            >
+              <Text style={styles.copyBtnText}>
+                {copiedId ? t('settings.wishwashIdCopiedShort') : t('settings.wishwashIdCopy')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.divider} />
           <View style={styles.notificationRow}>
             <View style={styles.notificationInfo}>
               <Text style={styles.notificationLabel}>{t('settings.emailStatus')}</Text>
@@ -252,6 +284,22 @@ const styles = StyleSheet.create({
   notificationInfo: { flex: 1, paddingRight: spacing.md },
   notificationLabel: { ...typography.body, fontWeight: '600' },
   notificationHint: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
+  wishwashIdValue: {
+    ...typography.h4,
+    color: colors.primary,
+    letterSpacing: 1.5,
+    marginTop: 2,
+    fontFamily: 'monospace',
+  },
+  copyBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radii.md,
+    paddingVertical: spacing.xs + 2,
+    paddingHorizontal: spacing.md,
+    alignSelf: 'center',
+  },
+  copyBtnDone: { backgroundColor: colors.success },
+  copyBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
   verifiedBadge: { fontSize: 24 },
   unverifiedBadge: { fontSize: 24 },
   resendBtn: { marginTop: spacing.sm },
