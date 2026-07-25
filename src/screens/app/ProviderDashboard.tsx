@@ -99,6 +99,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const [refreshing, setRefreshing] = useState(false);
   const [online, setOnline] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
+  const [locationPreview, setLocationPreview] = useState<{ lat: number; lng: number } | null>(null);
   const [requests, setRequests] = useState<BookingRequest[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [requestsError, setRequestsError] = useState<string | null>(null);
@@ -1777,6 +1778,19 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
                         <Text style={styles.acceptBtnText}>{t('provider.acceptBooking')}</Text>
                       )}
                     </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.previewLocationBtn}
+                      onPress={() => {
+                        if (req.latitude != null && req.longitude != null) {
+                          setLocationPreview({ lat: req.latitude, lng: req.longitude });
+                        } else {
+                          setLocationPreview(null);
+                        }
+                      }}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.previewLocationBtnText}>{t('provider.previewLocation')}</Text>
+                    </TouchableOpacity>
                   </View>
                 ))}
               </View>
@@ -1836,6 +1850,52 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         onConfirm={handleLogout}
         confirmVariant="danger"
       />
+
+      <Modal
+        visible={locationPreview !== undefined}
+        onClose={() => setLocationPreview(undefined)}
+        title={t('provider.locationPreviewTitle')}
+      >
+        {locationPreview ? (
+          <View>
+            <Text style={styles.locationPreviewSubtitle}>
+              {t('provider.locationPreviewSubtitle')}
+            </Text>
+            <View style={styles.locationPreviewMapWrap}>
+              <iframe
+                title="location-preview"
+                style={styles.locationPreviewIframe as any}
+                src={`https://www.google.com/maps?q=${locationPreview.lat.toFixed(2)},${locationPreview.lng.toFixed(2)}&z=13&output=embed`}
+                loading="lazy"
+              />
+            </View>
+            <TouchableOpacity
+              style={styles.locationPreviewCloseBtn}
+              onPress={() => setLocationPreview(undefined)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.locationPreviewCloseBtnText}>
+                {t('provider.locationPreviewClose')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View>
+            <Text style={styles.locationPreviewUnavailableText}>
+              {t('provider.locationPreviewUnavailable')}
+            </Text>
+            <TouchableOpacity
+              style={styles.locationPreviewCloseBtn}
+              onPress={() => setLocationPreview(undefined)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.locationPreviewCloseBtnText}>
+                {t('provider.locationPreviewClose')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </Modal>
     </View>
   );
 }
@@ -2304,6 +2364,57 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '700',
+  },
+  previewLocationBtn: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radii.lg,
+    paddingVertical: spacing.sm + 2,
+    alignItems: 'center',
+    marginTop: spacing.sm,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+  },
+  previewLocationBtnText: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  locationPreviewSubtitle: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    marginBottom: spacing.md,
+    lineHeight: 20,
+  },
+  locationPreviewMapWrap: {
+    width: '100%',
+    height: 260,
+    borderRadius: radii.lg,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    marginBottom: spacing.md,
+  },
+  locationPreviewIframe: {
+    width: '100%',
+    height: '100%',
+    border: 0,
+  },
+  locationPreviewUnavailableText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    marginBottom: spacing.md,
+    textAlign: 'center',
+  },
+  locationPreviewCloseBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radii.lg,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  locationPreviewCloseBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
   },
   jobList: { gap: spacing.sm },
   jobRow: {
