@@ -99,6 +99,9 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const [refreshing, setRefreshing] = useState(false);
   const [online, setOnline] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showWorkingHours, setShowWorkingHours] = useState(false);
+  const [showEquipmentPricing, setShowEquipmentPricing] = useState(false);
   const [locationPreview, setLocationPreview] = useState<{ lat: number; lng: number } | null>(null);
   const [requests, setRequests] = useState<BookingRequest[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
@@ -1253,7 +1256,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           size={36}
           showBadge={online}
           badgeColor={colors.accent}
-          onPress={() => setShowLogout(true)}
+          onPress={() => setShowProfileMenu(true)}
         />
       </View>
 
@@ -1301,24 +1304,6 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
             <Text style={styles.statLabel}>{t('provider.statReviews')}</Text>
           </View>
         </View>
-
-        {/* Partner profile: equipment + dynamic pricing */}
-        {profile && providerProfileId && (
-          <>
-            <EquipmentAndPricing
-              providerProfileId={providerProfileId}
-              profileId={profile.id}
-              initialEquipment={stats?.equipment ?? []}
-              initialPrice={stats?.service_price ?? 450}
-              completedJobs={stats?.completed_jobs ?? 0}
-              onUpdated={fetchData}
-            />
-            <AvailabilityCard
-              providerProfileId={providerProfileId}
-              onUpdated={fetchData}
-            />
-          </>
-        )}
 
         {/* Accepted booking confirmation */}
         {acceptedBooking && (
@@ -1850,6 +1835,118 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         onConfirm={handleLogout}
         confirmVariant="danger"
       />
+
+      <Modal
+        visible={showProfileMenu}
+        onClose={() => setShowProfileMenu(false)}
+        title={t('provider.menuTitle')}
+      >
+        <View>
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => { setShowProfileMenu(false); }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.menuItemIcon}>👤</Text>
+            <View style={styles.menuItemBody}>
+              <Text style={styles.menuItemLabel}>{t('provider.menuProfile')}</Text>
+              <Text style={styles.menuItemHint}>{t('provider.menuProfileHint')}</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => { setShowProfileMenu(false); setShowWorkingHours(true); }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.menuItemIcon}>🕒</Text>
+            <Text style={styles.menuItemLabel}>{t('provider.menuWorkingHours')}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => { setShowProfileMenu(false); setShowEquipmentPricing(true); }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.menuItemIcon}>🧰</Text>
+            <Text style={styles.menuItemLabel}>{t('provider.menuEquipment')}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => { setShowProfileMenu(false); setShowEquipmentPricing(true); }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.menuItemIcon}>💰</Text>
+            <Text style={styles.menuItemLabel}>{t('provider.menuPricing')}</Text>
+          </TouchableOpacity>
+
+          <View style={styles.menuDivider} />
+
+          <TouchableOpacity
+            style={[styles.menuItem, styles.menuItemDanger]}
+            onPress={() => { setShowProfileMenu(false); setShowLogout(true); }}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.menuItemIcon}>🚪</Text>
+            <Text style={[styles.menuItemLabel, styles.menuItemLabelDanger]}>
+              {t('provider.menuLogout')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showWorkingHours}
+        onClose={() => setShowWorkingHours(false)}
+        title={t('provider.menuWorkingHours')}
+      >
+        <View>
+          {profile && providerProfileId && (
+            <AvailabilityCard
+              providerProfileId={providerProfileId}
+              onUpdated={fetchData}
+            />
+          )}
+          <TouchableOpacity
+            style={styles.locationPreviewCloseBtn}
+            onPress={() => setShowWorkingHours(false)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.locationPreviewCloseBtnText}>
+              {t('provider.locationPreviewClose')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showEquipmentPricing}
+        onClose={() => setShowEquipmentPricing(false)}
+        title={t('provider.menuEquipment')}
+      >
+        <View>
+          {profile && providerProfileId && (
+            <EquipmentAndPricing
+              providerProfileId={providerProfileId}
+              profileId={profile.id}
+              initialEquipment={stats?.equipment ?? []}
+              initialPrice={stats?.service_price ?? 450}
+              completedJobs={stats?.completed_jobs ?? 0}
+              onUpdated={fetchData}
+            />
+          )}
+          <TouchableOpacity
+            style={styles.locationPreviewCloseBtn}
+            onPress={() => setShowEquipmentPricing(false)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.locationPreviewCloseBtnText}>
+              {t('provider.locationPreviewClose')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
 
       <Modal
         visible={locationPreview !== undefined}
@@ -2415,6 +2512,25 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 15,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.md,
+    gap: spacing.md,
+  },
+  menuItemBody: { flex: 1 },
+  menuItemIcon: { fontSize: 22 },
+  menuItemLabel: { ...typography.body, fontWeight: '600', color: colors.textPrimary },
+  menuItemHint: { ...typography.caption, color: colors.textMuted, marginTop: 2 },
+  menuItemDanger: { backgroundColor: colors.error + '0D' },
+  menuItemLabelDanger: { color: colors.error },
+  menuDivider: {
+    height: 1,
+    backgroundColor: colors.borderLight,
+    marginVertical: spacing.xs,
   },
   jobList: { gap: spacing.sm },
   jobRow: {
