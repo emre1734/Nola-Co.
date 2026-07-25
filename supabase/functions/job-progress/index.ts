@@ -375,7 +375,7 @@ Deno.serve(async (req: Request) => {
         .from("jobs")
         .select(
           "id, booking_id, status, before_photo_url, after_photo_url, completed_at, updated_at, provider_id, " +
-          "bookings!inner(id, estimated_price, customer_id, services(name), vehicles(brand, model, plate, color))",
+          "bookings!inner(id, estimated_price, customer_id, booking_date, booking_time, services(name), vehicles(brand, model, plate, color))",
         )
         .eq("customer_id", userId)
         .eq("status", "completed")
@@ -401,6 +401,8 @@ Deno.serve(async (req: Request) => {
         bookings: {
           estimated_price: number | null;
           customer_id: string;
+          booking_date: string | null;
+          booking_time: string | null;
           services?: { name: string } | null;
           vehicles?: { brand: string; model: string; plate: string; color: string | null } | null;
         } | null;
@@ -437,6 +439,8 @@ Deno.serve(async (req: Request) => {
         completed_at: j.completed_at,
         updated_at: j.updated_at,
         estimated_price: j.bookings?.estimated_price ?? null,
+        booking_date: j.bookings?.booking_date ?? null,
+        booking_time: j.bookings?.booking_time ?? null,
         service_name: j.bookings?.services?.name ?? null,
         vehicle: j.bookings?.vehicles ?? null,
         provider_name: j.provider_id ? (cProviderNameMap[j.provider_id] ?? null) : null,
