@@ -87,7 +87,7 @@ function haversineKm(
 }
 
 export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps) {
-  const { profile, signOut } = useAuth();
+  const { profile, session, signOut } = useAuth();
   const { showToast } = useToast();
   const { t } = useTranslation();
   const [stats, setStats] = useState<ProviderStats | null>(null);
@@ -100,6 +100,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const [online, setOnline] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showProfilePanel, setShowProfilePanel] = useState(false);
   const [showWorkingHours, setShowWorkingHours] = useState(false);
   const [showEquipmentPricing, setShowEquipmentPricing] = useState(false);
   const [locationPreview, setLocationPreview] = useState<{ lat: number; lng: number } | null>(null);
@@ -1844,13 +1845,12 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         <View>
           <TouchableOpacity
             style={styles.menuItem}
-            onPress={() => { setShowProfileMenu(false); }}
+            onPress={() => { setShowProfileMenu(false); setShowProfilePanel(true); }}
             activeOpacity={0.7}
           >
             <Text style={styles.menuItemIcon}>👤</Text>
             <View style={styles.menuItemBody}>
               <Text style={styles.menuItemLabel}>{t('provider.menuProfile')}</Text>
-              <Text style={styles.menuItemHint}>{t('provider.menuProfileHint')}</Text>
             </View>
           </TouchableOpacity>
 
@@ -1891,6 +1891,57 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
             <Text style={styles.menuItemIcon}>🚪</Text>
             <Text style={[styles.menuItemLabel, styles.menuItemLabelDanger]}>
               {t('provider.menuLogout')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showProfilePanel}
+        onClose={() => setShowProfilePanel(false)}
+        title={t('provider.menuProfile')}
+      >
+        <View>
+          <View style={styles.profileRow}>
+            <Text style={styles.profileRowLabel}>{t('provider.profileFullName')}</Text>
+            <Text style={styles.profileRowValue}>{profile?.full_name || session?.user?.email || '—'}</Text>
+          </View>
+          <View style={styles.profileRow}>
+            <Text style={styles.profileRowLabel}>{t('provider.profileEmail')}</Text>
+            <Text style={styles.profileRowValue}>{profile?.email || session?.user?.email || '—'}</Text>
+          </View>
+          <View style={styles.profileRow}>
+            <Text style={styles.profileRowLabel}>{t('settings.wishwashIdLabel')}</Text>
+            {profile?.wishwash_id ? (
+              <View style={styles.profileIdRow}>
+                <Text style={styles.profileIdValue}>{profile.wishwash_id}</Text>
+                <TouchableOpacity
+                  style={styles.profileIdCopyBtn}
+                  onPress={async () => {
+                    try {
+                      await navigator.clipboard.writeText(profile.wishwash_id);
+                      showToast(t('settings.wishwashIdCopied'), 'success');
+                    } catch {
+                      showToast(t('settings.wishwashIdCopyFailed'), 'error');
+                    }
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.profileIdCopyBtnText}>{t('settings.wishwashIdCopy')}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <Text style={styles.profileIdUnavailable}>{t('provider.profileIdUnavailable')}</Text>
+            )}
+          </View>
+          <Text style={styles.profileIdHelper}>{t('provider.profileIdHelper')}</Text>
+          <TouchableOpacity
+            style={styles.locationPreviewCloseBtn}
+            onPress={() => setShowProfilePanel(false)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.locationPreviewCloseBtnText}>
+              {t('provider.locationPreviewClose')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -2512,6 +2563,57 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
     fontSize: 15,
+  },
+  profileRow: {
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  profileRowLabel: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  profileRowValue: {
+    ...typography.body,
+    color: colors.textPrimary,
+    fontWeight: '500',
+  },
+  profileIdRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  profileIdValue: {
+    ...typography.body,
+    fontWeight: '700',
+    color: colors.primary,
+    fontFamily: 'monospace',
+    fontSize: 16,
+  },
+  profileIdCopyBtn: {
+    backgroundColor: colors.primary + '1A',
+    borderRadius: radii.sm,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  profileIdCopyBtnText: {
+    color: colors.primary,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  profileIdUnavailable: {
+    ...typography.body,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+  },
+  profileIdHelper: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: spacing.md,
+    lineHeight: 18,
   },
   menuItem: {
     flexDirection: 'row',
