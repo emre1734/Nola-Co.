@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -162,8 +162,17 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // Closing a customer-approved completed job.
   const [closingJob, setClosingJob] = useState(false);
 
+  // Stable ref for the translation function so callbacks that need it don't
+  // change identity every render (t is recreated each render by useTranslation).
+  const tRef = useRef(t);
+  tRef.current = t;
+
+  // Stale-request guard: only the latest fetch may write to state.
+  const fetchSeqRef = useRef(0);
+
   const fetchRequests = useCallback(async () => {
     if (!profile) return;
+    const seq = ++fetchSeqRef.current;
     setRequestsError(null);
     setRequestsLoading(true);
     const { data, error } = await supabase
@@ -180,6 +189,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       .order('created_at', { ascending: false })
       .limit(20);
     setRequestsLoading(false);
+    if (seq !== fetchSeqRef.current) return;
     if (error) {
       console.error('[fetchRequests] failed:', {
         code: error.code,
@@ -187,7 +197,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         details: error.details,
         hint: error.hint,
       });
-      setRequestsError(t('provider.errLoadPending'));
+      setRequestsError(tRef.current('provider.errLoadPending'));
       return;
     }
     const allRequests = (data as BookingRequest[]) ?? [];
@@ -204,9 +214,10 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         rejectedIds = new Set(rejections.map(r => (r as { booking_id: string }).booking_id));
       }
     }
+    if (seq !== fetchSeqRef.current) return;
     setRejectedBookingIds(rejectedIds);
     setRequests(allRequests.filter(r => !rejectedIds.has(r.id)));
-  }, [profile, providerProfileId, t]);
+  }, [profile, providerProfileId]);
 
   const fetchData = async (): Promise<string | null> => {
     if (!profile) return null;
@@ -378,8 +389,14 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     };
   }, [providerProfileId, fetchActiveBooking]);
 
-  // Realtime subscription: listen for new waiting bookings while online.
-  // Shows an in-app notification banner and refreshes the request list.
+  // Realtime subscription: listen for booking changes while online.
+  // Single source of truth: realtime events trigger a full DB refresh via
+  // fetchRequests(). We do NOT also directly mutate local state from the
+  // realtime payload — that was the root cause of the flicker (competing
+  // state update paths racing each other).
+  const fetchRequestsRef = useRef(fetchRequests);
+  fetchRequestsRef.current = fetchRequests;
+
   useEffect(() => {
     if (!online) return;
     const channel = supabase
@@ -395,7 +412,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         (payload) => {
           const newBooking = payload.new as BookingRequest;
           setNewReservation(newBooking);
-          fetchRequests();
+          fetchRequestsRef.current();
         },
       )
       .on(
@@ -405,21 +422,18 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           schema: 'public',
           table: 'bookings',
         },
-        (payload) => {
-          const updated = payload.new as { id: string; status: string; provider_id: string | null };
-          // When a booking is accepted (by us or another partner), remove it
-          // from the list and dismiss the banner if it matches.
-          if (updated.status !== 'waiting' || updated.provider_id != null) {
-            setRequests(prev => prev.filter(r => r.id !== updated.id));
-            setNewReservation(prev => (prev?.id === updated.id ? null : prev));
-          }
+        () => {
+          // Any booking update may change eligibility (accepted elsewhere,
+          // rejected, cancelled, etc.). Re-fetch authoritative data from the
+          // database instead of manually mutating local state.
+          fetchRequestsRef.current();
         },
       )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [online, fetchRequests]);
+  }, [online]);
 
   const onRefresh = async () => {
     setRefreshing(true);
