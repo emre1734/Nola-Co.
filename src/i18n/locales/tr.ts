@@ -365,7 +365,7 @@ export const tr = {
     errLoadProfile: 'Ortak profiliniz yüklenemedi. Lütfen tekrar deneyin.',
     errNoProviderProfile: 'Ortak profili bulunamadı. Lütfen önce ortak katılımını tamamlayın.',
     errBookingGone: 'Rezervasyon artık mevcut değil',
-    errAlreadyAccepted: 'Bu rezervasyon zaten başka bir ortak tarafından kabul edildi',
+    errAlreadyAccepted: 'Bu rezervasyon başka bir yıkayıcı tarafından kabul edildi.',
     errConflict: 'Bu saat dilimiyle çakışan başka rezervasyonunuz var',
     errAcceptFailed: 'Rezervasyon kabul edilemedi. Lütfen tekrar deneyin.',
     successAccepted: 'Rezervasyon başarıyla kabul edildi!',
