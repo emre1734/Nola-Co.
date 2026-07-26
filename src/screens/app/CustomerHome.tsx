@@ -14,6 +14,7 @@ import { supabase } from '../../lib/supabase';
 import { colors, spacing, typography, radii } from '../../theme';
 import { Modal } from '../../components/ui/Modal';
 import { useTranslation } from '../../i18n/useTranslation';
+import { WasherTrackingMap } from '../../components/WasherTrackingMap';
 
 interface CustomerHomeProps {
   onBack: () => void;
@@ -36,6 +37,12 @@ interface BookingItem {
   services?: { name: string } | null;
 }
 
+interface ActiveBooking extends BookingItem {
+  provider_id: string | null;
+}
+
+const TRACKABLE_STATUSES = ['accepted', 'on_the_way'];
+
 export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
   const { t } = useTranslation();
   const { profile, signOut } = useAuth();
@@ -46,15 +53,24 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
   const [loadingData, setLoadingData] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
+  const [activeBooking, setActiveBooking] = useState<ActiveBooking | null>(null);
+  const [trackingBookingId, setTrackingBookingId] = useState<string | null>(null);
 
   const fetchData = async () => {
-    const [{ data: svcData, error: svcErr }, { data: bkData, error: bkErr }] = await Promise.all([
+    const [{ data: svcData, error: svcErr }, { data: bkData, error: bkErr }, { data: activeData, error: activeErr }] = await Promise.all([
       supabase.from('services').select('id, name, description, base_price, estimated_duration').eq('is_active', true).limit(6),
       supabase
         .from('bookings')
         .select('id, status, estimated_price, created_at, services(name)')
         .order('created_at', { ascending: false })
         .limit(5),
+      supabase
+        .from('bookings')
+        .select('id, status, estimated_price, created_at, provider_id, services(name)')
+        .in('status', TRACKABLE_STATUSES)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
     if (svcErr || bkErr) {
       showToast(t('customerHome.errLoadData'), 'error');
@@ -62,6 +78,11 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
     }
     setServices((svcData as ServiceItem[]) ?? []);
     setBookings((bkData as BookingItem[]) ?? []);
+    if (activeErr || !activeData) {
+      setActiveBooking(null);
+    } else {
+      setActiveBooking(activeData as ActiveBooking);
+    }
   };
 
   useEffect(() => {
@@ -90,6 +111,8 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
     return map[s] ?? colors.textMuted;
   };
 
+  const canTrack = activeBooking?.status === 'on_the_way' && !!activeBooking.provider_id;
+
   if (loadingData) return <Loading fullScreen message={t('customerHome.loading')} />;
 
   return (
@@ -111,6 +134,37 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
         contentContainerStyle={styles.scrollContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
+        {/* Active booking tracking card */}
+        {activeBooking && (
+          <View style={styles.trackingCard}>
+            <View style={styles.trackingHeader}>
+              <Text style={styles.trackingIcon}>🚗</Text>
+              <View style={styles.trackingBody}>
+                <Text style={styles.trackingTitle}>{t('customerHome.activeBookingTitle')}</Text>
+                <Text style={styles.trackingService}>
+                  {(activeBooking.services as any)?.name ?? t('customerHome.washServiceFallback')}
+                </Text>
+              </View>
+              <View style={[styles.statusBadge, { backgroundColor: colors.primary + '25' }]}>
+                <Text style={[styles.statusText, { color: colors.primary }]}>
+                  {activeBooking.status === 'on_the_way' ? t('customerHome.statusOnTheWay') : t('customerHome.statusAccepted')}
+                </Text>
+              </View>
+            </View>
+            {canTrack ? (
+              <TouchableOpacity
+                style={styles.trackBtn}
+                onPress={() => setTrackingBookingId(activeBooking.id)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.trackBtnText}>{t('customerHome.trackWasher')}</Text>
+              </TouchableOpacity>
+            ) : (
+              <Text style={styles.trackingHint}>{t('customerHome.trackingWaitingHint')}</Text>
+            )}
+          </View>
+        )}
+
         <View style={styles.heroCard}>
           <View>
             <Text style={styles.heroTitle}>{t('customerHome.heroTitle')}</Text>
@@ -194,6 +248,13 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
         onConfirm={handleLogout}
         confirmVariant="danger"
       />
+
+      {trackingBookingId && (
+        <WasherTrackingMap
+          bookingId={trackingBookingId}
+          onClose={() => setTrackingBookingId(null)}
+        />
+      )}
     </View>
   );
 }
@@ -269,4 +330,31 @@ const styles = StyleSheet.create({
   bookingPrice: { ...typography.body, fontWeight: '700', color: colors.primary },
   statusBadge: { borderRadius: radii.full, paddingVertical: 3, paddingHorizontal: 10 },
   statusText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
+
+  trackingCard: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radii.xl,
+    padding: spacing.md,
+    marginBottom: spacing.xl,
+    borderWidth: 1,
+    borderColor: colors.primary + '30',
+  },
+  trackingHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  trackingIcon: { fontSize: 28 },
+  trackingBody: { flex: 1 },
+  trackingTitle: { ...typography.h4, marginBottom: 2 },
+  trackingService: { ...typography.bodySmall, color: colors.textSecondary },
+  trackingHint: { ...typography.bodySmall, color: colors.textMuted, fontStyle: 'italic' },
+  trackBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radii.lg,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  trackBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 });
