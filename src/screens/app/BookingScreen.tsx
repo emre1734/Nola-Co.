@@ -159,9 +159,11 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
     setServices((sData as Service[]) ?? []);
   }, [showToast]);
 
-  // Check whether the customer has an active booking with job status
-  // 'on_the_way'. Uses the service-role-free RLS-protected query — the
-  // customer can only see their own bookings.
+  // Check whether the customer has an active booking whose assigned job is
+  // 'on_the_way'. Reuses the same SECURITY DEFINER RPC as CustomerHome
+  // (get_assigned_washer_location) so the booking page and home page share
+  // one source of truth and never query the jobs table directly (which is
+  // RLS-locked for customers).
   const fetchTrackingBooking = useCallback(async () => {
     if (!session) return;
     const { data, error } = await supabase
@@ -176,19 +178,17 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
       setTrackingBookingId(null);
       return;
     }
-    const bookingIds = data.map(b => b.id);
-    const { data: jobs, error: jobErr } = await supabase
-      .from('jobs')
-      .select('id, booking_id, status')
-      .in('booking_id', bookingIds)
-      .eq('status', 'on_the_way')
-      .order('created_at', { ascending: false })
-      .limit(1);
-    if (jobErr || !jobs || jobs.length === 0) {
-      setTrackingBookingId(null);
-      return;
+    for (const b of data) {
+      const { data: rpcData } = await supabase.rpc('get_assigned_washer_location', {
+        p_booking_id: b.id,
+      });
+      const rows = (rpcData ?? []) as Array<{ job_status: string | null }>;
+      if (rows.length > 0 && rows[0].job_status === 'on_the_way') {
+        setTrackingBookingId(b.id);
+        return;
+      }
     }
-    setTrackingBookingId(jobs[0].booking_id);
+    setTrackingBookingId(null);
   }, [session]);
 
   // Realtime: listen for job status changes to auto-close the tracking
