@@ -2308,7 +2308,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         onClose={() => setLocationPreview(undefined)}
         title={t('provider.locationPreviewTitle')}
       >
-        {locationPreview ? (
+        {locationPreview && Number.isFinite(locationPreview.lat) && Number.isFinite(locationPreview.lng) ? (
           <View>
             <Text style={styles.locationPreviewSubtitle}>
               {t('provider.locationPreviewSubtitle')}
@@ -2317,10 +2317,18 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
               <iframe
                 title="location-preview"
                 style={styles.locationPreviewIframe as any}
-                src={`https://www.google.com/maps?q=${locationPreview.lat.toFixed(2)},${locationPreview.lng.toFixed(2)}&z=13&output=embed`}
+                src={`https://maps.google.com/maps?q=${encodeURIComponent(locationPreview.lat.toFixed(2))},${encodeURIComponent(locationPreview.lng.toFixed(2))}&z=13&output=embed`}
                 loading="lazy"
               />
             </View>
+            <a
+              href={`https://www.google.com/maps/search/?api=1&query=${locationPreview.lat.toFixed(2)},${locationPreview.lng.toFixed(2)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ display: 'block', textAlign: 'center', padding: '10px 0', color: '#fff', backgroundColor: '#2563eb', borderRadius: 8, fontWeight: 700, fontSize: 15, marginBottom: 10, textDecoration: 'none' }}
+            >
+              {t('provider.locationPreviewOpenInMaps')}
+            </a>
             <TouchableOpacity
               style={styles.locationPreviewCloseBtn}
               onPress={() => setLocationPreview(undefined)}
