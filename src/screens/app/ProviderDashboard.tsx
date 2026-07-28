@@ -399,15 +399,141 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     }
 
     if (activeJobs.length > 1) {
-      // Multiple active jobs for one provider is an inconsistent state.
-      // Do NOT pick an arbitrary one. Log a production-safe error and show
-      // a safe error state.
-      console.error('[fetchActiveBooking] multiple active jobs found for provider', {
-        provider_id: ppId,
-        count: activeJobs.length,
-        job_ids: activeJobs.map(j => j.id),
-      });
-      showToast(tRef.current('provider.errMultipleActiveJobs'), 'error');
+      // Multiple active jobs — inconsistent state. Try to find the job
+      // matching the current acceptedBooking. If found, restore state
+      // from it. If not, check whether the current acceptedBooking is
+      // freshly accepted (no job at all — valid, leave alone) or stale
+      // (job progressed to completion/cancellation — clear it).
+      const currentBookingId = acceptedBookingRef.current?.id;
+
+      if (currentBookingId) {
+        const matchingJob = activeJobs.find(j => j.booking_id === currentBookingId);
+
+        if (matchingJob) {
+          // The current acceptedBooking has an active job — restore
+          // state from it so the UI reflects the true job status.
+          const { data: activeBooking, error: bookingQueryError } = await supabase
+            .from('bookings')
+            .select(`
+              id, customer_id, customer_note, address, created_at, scheduled_at,
+              estimated_price, latitude, longitude, booking_date, booking_time, extra_services,
+              profiles!bookings_customer_id_fkey(full_name),
+              vehicles!bookings_vehicle_id_fkey(brand, model, plate, color),
+              services!bookings_service_id_fkey(name, base_price)
+            `)
+            .eq('id', matchingJob.booking_id)
+            .maybeSingle();
+
+          if (!bookingQueryError && activeBooking) {
+            setAcceptedBooking(activeBooking as BookingRequest);
+            setActiveJob({
+              id: matchingJob.id,
+              status: matchingJob.status ?? '',
+              provider_id: matchingJob.provider_id ?? '',
+              before_photo_url: matchingJob.before_photo_url ?? null,
+              after_photo_url: matchingJob.after_photo_url ?? null,
+              provider_closed_at: matchingJob.provider_closed_at ?? null,
+            });
+            const st = matchingJob.status ?? '';
+            if (['on_the_way', 'arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
+              setOnMyWayDone(true);
+            }
+            if (['arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
+              setArrivedDone(true);
+            }
+            if (['started', 'pending_approval', 'completed'].includes(st)) {
+              setStartWashDone(true);
+            }
+            if (['pending_approval', 'completed'].includes(st)) {
+              setSendApprovalDone(true);
+            }
+            if (st === 'completed') {
+              setCustomerApproved(true);
+            }
+            if (matchingJob.before_photo_url) {
+              setPhotoPreview(matchingJob.before_photo_url);
+              setPhotoUploaded(true);
+            }
+            if (matchingJob.after_photo_url) {
+              setAfterPhotoPreview(matchingJob.after_photo_url);
+              setAfterPhotoUploaded(true);
+            }
+          }
+        } else {
+          // Current acceptedBooking doesn't match any active job.
+          // Check if it has any job row at all — if so, it's stale.
+          const { data: staleJob } = await supabase
+            .from('jobs')
+            .select('id, status')
+            .eq('booking_id', currentBookingId)
+            .limit(1);
+          if (staleJob && staleJob.length > 0) {
+            setAcceptedBooking(null);
+            setActiveJob(null);
+            setOnMyWayDone(false);
+            setArrivedDone(false);
+            setStartWashDone(false);
+            setSendApprovalDone(false);
+            setCustomerApproved(false);
+          }
+          // If no job row at all, it's freshly accepted — leave alone.
+        }
+      } else {
+        // No current acceptedBooking — pick the most recent active job
+        // and restore state from it. Log the inconsistency for diagnosis.
+        console.warn('[fetchActiveBooking] multiple active jobs, restoring most recent', {
+          provider_id: ppId,
+          count: activeJobs.length,
+        });
+        const recentJob = activeJobs[0];
+        const { data: recentBooking, error: recentBookingErr } = await supabase
+          .from('bookings')
+          .select(`
+            id, customer_id, customer_note, address, created_at, scheduled_at,
+            estimated_price, latitude, longitude, booking_date, booking_time, extra_services,
+            profiles!bookings_customer_id_fkey(full_name),
+            vehicles!bookings_vehicle_id_fkey(brand, model, plate, color),
+            services!bookings_service_id_fkey(name, base_price)
+          `)
+          .eq('id', recentJob.booking_id)
+          .maybeSingle();
+
+        if (!recentBookingErr && recentBooking) {
+          setAcceptedBooking(recentBooking as BookingRequest);
+          setActiveJob({
+            id: recentJob.id,
+            status: recentJob.status ?? '',
+            provider_id: recentJob.provider_id ?? '',
+            before_photo_url: recentJob.before_photo_url ?? null,
+            after_photo_url: recentJob.after_photo_url ?? null,
+            provider_closed_at: recentJob.provider_closed_at ?? null,
+          });
+          const st = recentJob.status ?? '';
+          if (['on_the_way', 'arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
+            setOnMyWayDone(true);
+          }
+          if (['arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
+            setArrivedDone(true);
+          }
+          if (['started', 'pending_approval', 'completed'].includes(st)) {
+            setStartWashDone(true);
+          }
+          if (['pending_approval', 'completed'].includes(st)) {
+            setSendApprovalDone(true);
+          }
+          if (st === 'completed') {
+            setCustomerApproved(true);
+          }
+          if (recentJob.before_photo_url) {
+            setPhotoPreview(recentJob.before_photo_url);
+            setPhotoUploaded(true);
+          }
+          if (recentJob.after_photo_url) {
+            setAfterPhotoPreview(recentJob.after_photo_url);
+            setAfterPhotoUploaded(true);
+          }
+        }
+      }
       return;
     }
 
@@ -1713,7 +1839,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
                   : t('provider.locationUnavailable')}
               </Text>
             </TouchableOpacity>
-            {!onMyWayDone ? (
+            {!onMyWayDone && !activeJob ? (
               <TouchableOpacity
                 style={[styles.onMyWayBtn, onMyWayUpdating && styles.onMyWayBtnDisabled]}
                 onPress={handleOnMyWay}
