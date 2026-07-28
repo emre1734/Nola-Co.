@@ -313,10 +313,12 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
     // No active job in the jobs table. Before returning, check if the provider
     // has an accepted booking that hasn't transitioned to a job yet (the job is
-    // created when the provider clicks "On My Way"). If so, restore the
-    // acceptedBooking from the bookings table — do NOT clear it.
+    // created when the provider clicks "On My Way"). Only restore bookings
+    // that have NO job row — a booking whose job has already progressed to
+    // on_the_way/arrived/started/pending_approval/completed/cancelled must not
+    // show the "On My Way" button (the edge function would reject it with 409).
     if (!activeJobs || activeJobs.length === 0) {
-      const { data: acceptedBookingRow, error: acceptedErr } = await supabase
+      const { data: acceptedBookings, error: acceptedErr } = await supabase
         .from('bookings')
         .select(`
           id, customer_id, customer_note, address, created_at, scheduled_at,
@@ -327,9 +329,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         `)
         .eq('provider_id', ppId)
         .eq('status', 'accepted')
-        .order('accepted_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order('accepted_at', { ascending: false });
 
       if (acceptedErr) {
         console.error('[fetchActiveBooking] accepted booking query failed:', {
@@ -339,13 +339,62 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         return;
       }
 
-      if (acceptedBookingRow) {
-        setAcceptedBooking(acceptedBookingRow as BookingRequest);
+      // Filter out bookings that already have a job row.
+      let validBooking: BookingRequest | null = null;
+      if (acceptedBookings && acceptedBookings.length > 0) {
+        const bookingIds = acceptedBookings.map(b => b.id);
+        const { data: existingJobs, error: jobsLookupError } = await supabase
+          .from('jobs')
+          .select('id, booking_id')
+          .in('booking_id', bookingIds);
+
+        if (jobsLookupError) {
+          console.error('[fetchActiveBooking] job lookup for accepted bookings failed:', {
+            code: jobsLookupError.code,
+            message: jobsLookupError.message,
+          });
+          return;
+        }
+
+        const bookingIdsWithJobs = new Set((existingJobs ?? []).map(j => j.booking_id));
+        validBooking = acceptedBookings.find(b => !bookingIdsWithJobs.has(b.id)) ?? null;
+
+        // If the currently displayed acceptedBooking is stale (its job has
+        // progressed), clear it now — don't wait for another realtime event.
+        if (
+          !validBooking &&
+          acceptedBookingRef.current &&
+          bookingIdsWithJobs.has(acceptedBookingRef.current.id)
+        ) {
+          setAcceptedBooking(null);
+          setActiveJob(null);
+        }
+      } else if (acceptedBookingRef.current) {
+        // No accepted bookings at all. Check if the current acceptedBooking
+        // has a job row — if so, it's stale and must be cleared. If not, leave
+        // it intact (race window between accept and on_my_way).
+        const { data: staleJob, error: staleJobError } = await supabase
+          .from('jobs')
+          .select('id')
+          .eq('booking_id', acceptedBookingRef.current.id)
+          .limit(1);
+        if (staleJobError) {
+          console.error('[fetchActiveBooking] stale job check failed:', {
+            code: staleJobError.code,
+            message: staleJobError.message,
+          });
+          return;
+        }
+        if (staleJob && staleJob.length > 0) {
+          setAcceptedBooking(null);
+          setActiveJob(null);
+        }
+      }
+
+      if (validBooking) {
+        setAcceptedBooking(validBooking as BookingRequest);
         setActiveJob(null);
       }
-      // If no accepted booking found either, leave existing state intact —
-      // do NOT clear. The caller may have a valid in-progress job that hasn't
-      // been committed to the DB yet (race window between accept and on_my_way).
       return;
     }
 
