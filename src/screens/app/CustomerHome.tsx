@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -41,7 +41,7 @@ interface ActiveBooking extends BookingItem {
   provider_id: string | null;
 }
 
-const TRACKABLE_STATUSES = ['accepted', 'on_the_way'];
+const ACTIVE_BOOKING_STATUSES = ['accepted', 'on_the_way'];
 
 export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
   const { t } = useTranslation();
@@ -55,6 +55,9 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
   const [showLogout, setShowLogout] = useState(false);
   const [activeBooking, setActiveBooking] = useState<ActiveBooking | null>(null);
   const [trackingBookingId, setTrackingBookingId] = useState<string | null>(null);
+  const [jobOnTheWay, setJobOnTheWay] = useState(false);
+  const activeBookingRef = useRef<ActiveBooking | null>(null);
+  activeBookingRef.current = activeBooking;
 
   const fetchData = async () => {
     const [{ data: svcData, error: svcErr }, { data: bkData, error: bkErr }, { data: activeData, error: activeErr }] = await Promise.all([
@@ -67,7 +70,7 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
       supabase
         .from('bookings')
         .select('id, status, estimated_price, created_at, provider_id, services(name)')
-        .in('status', TRACKABLE_STATUSES)
+        .in('status', ACTIVE_BOOKING_STATUSES)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle(),
@@ -80,8 +83,20 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
     setBookings((bkData as BookingItem[]) ?? []);
     if (activeErr || !activeData) {
       setActiveBooking(null);
+      setJobOnTheWay(false);
+      return;
+    }
+    const ab = activeData as ActiveBooking;
+    setActiveBooking(ab);
+    // Check if the assigned job is actually on_the_way via the secure RPC.
+    if (ab.provider_id) {
+      const { data: rpcData } = await supabase.rpc('get_assigned_washer_location', {
+        p_booking_id: ab.id,
+      });
+      const rows = (rpcData ?? []) as Array<{ job_status: string | null }>;
+      setJobOnTheWay(rows.length > 0 && rows[0].job_status === 'on_the_way');
     } else {
-      setActiveBooking(activeData as ActiveBooking);
+      setJobOnTheWay(false);
     }
   };
 
@@ -111,7 +126,47 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
     return map[s] ?? colors.textMuted;
   };
 
-  const canTrack = activeBooking?.status === 'on_the_way' && !!activeBooking.provider_id;
+  const canTrack = jobOnTheWay && !!activeBooking?.provider_id;
+
+  // Realtime: listen for job status changes so the tracking button and
+  // tracking view react without a page refresh. When the job transitions
+  // away from on_the_way (arrived/completed/cancelled), close the tracking
+  // view and clear the button.
+  const handleJobUpdate = useCallback((payload: { new?: { status?: string; booking_id?: string } } | null) => {
+    const newStatus = payload?.new?.status;
+    const bookingId = payload?.new?.booking_id;
+    const ab = activeBookingRef.current;
+    if (!ab || bookingId !== ab.id) return;
+    if (newStatus === 'on_the_way') {
+      setJobOnTheWay(true);
+    } else {
+      setJobOnTheWay(false);
+      setTrackingBookingId(null);
+      if (newStatus === 'arrived') {
+        showToast(t('customerHome.washerArrived'), 'success');
+      }
+    }
+  }, [showToast, t]);
+
+  useEffect(() => {
+    if (!activeBooking) return;
+    const channel = supabase
+      .channel(`customer-job:${activeBooking.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'jobs',
+          filter: `booking_id=eq.${activeBooking.id}`,
+        },
+        handleJobUpdate,
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeBooking, handleJobUpdate]);
 
   if (loadingData) return <Loading fullScreen message={t('customerHome.loading')} />;
 
@@ -147,7 +202,7 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
               </View>
               <View style={[styles.statusBadge, { backgroundColor: colors.primary + '25' }]}>
                 <Text style={[styles.statusText, { color: colors.primary }]}>
-                  {activeBooking.status === 'on_the_way' ? t('customerHome.statusOnTheWay') : t('customerHome.statusAccepted')}
+                  {jobOnTheWay ? t('customerHome.statusOnTheWay') : t('customerHome.statusAccepted')}
                 </Text>
               </View>
             </View>
