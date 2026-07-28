@@ -207,22 +207,32 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   acceptedBookingRef.current = acceptedBooking;
 
   const fetchRequests = useCallback(async () => {
-    if (!profile) return;
+    if (!profile || !providerProfileId) return;
     const seq = ++fetchSeqRef.current;
     setRequestsError(null);
     setRequestsLoading(true);
+
+    // Load only booking offers assigned to this provider that are pending
+    // and not yet expired. Join through to bookings + customer profile.
     const { data, error } = await supabase
-      .from('bookings')
+      .from('booking_offers')
       .select(`
-        id, customer_id, customer_note, address, created_at, scheduled_at,
-        estimated_price, latitude, longitude, booking_date, booking_time, extra_services,
-        profiles!bookings_customer_id_fkey(full_name),
-        vehicles!bookings_vehicle_id_fkey(brand, model, plate, color),
-        services!bookings_service_id_fkey(name, base_price)
+        id,
+        booking_id,
+        status,
+        expires_at,
+        bookings!booking_offers_booking_id_fkey(
+          id, customer_id, customer_note, address, created_at, scheduled_at,
+          estimated_price, latitude, longitude, booking_date, booking_time, extra_services,
+          profiles!bookings_customer_id_fkey(full_name),
+          vehicles!bookings_vehicle_id_fkey(brand, model, plate, color),
+          services!bookings_service_id_fkey(name, base_price)
+        )
       `)
-      .eq('status', 'waiting')
-      .is('provider_id', null)
-      .order('created_at', { ascending: false })
+      .eq('provider_id', providerProfileId)
+      .eq('status', 'pending')
+      .gt('expires_at', new Date().toISOString())
+      .order('offered_at', { ascending: false })
       .limit(20);
     setRequestsLoading(false);
     if (seq !== fetchSeqRef.current) return;
@@ -236,23 +246,23 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       setRequestsError(tRef.current('provider.errLoadPending'));
       return;
     }
-    const allRequests = (data as BookingRequest[]) ?? [];
 
-    // Load this provider's persisted rejections so rejected bookings stay
-    // hidden across refresh, logout/login, and app restart.
-    let rejectedIds = new Set<string>();
-    if (providerProfileId) {
-      const { data: rejections, error: rejError } = await supabase
-        .from('booking_rejections')
-        .select('booking_id')
-        .eq('provider_id', providerProfileId);
-      if (!rejError && rejections) {
-        rejectedIds = new Set(rejections.map(r => (r as { booking_id: string }).booking_id));
-      }
-    }
-    if (seq !== fetchSeqRef.current) return;
-    setRejectedBookingIds(rejectedIds);
-    setRequests(allRequests.filter(r => !rejectedIds.has(r.id)));
+    // Flatten the nested booking data into the BookingRequest shape
+    // that the existing card UI expects.
+    const offers = (data ?? []) as unknown as Array<{
+      id: string;
+      booking_id: string;
+      status: string;
+      expires_at: string;
+      bookings: BookingRequest;
+    }>;
+    const allRequests = offers.map(o => ({
+      ...o.bookings,
+      id: o.booking_id,
+    }));
+
+    setRejectedBookingIds(new Set());
+    setRequests(allRequests);
   }, [profile, providerProfileId]);
 
   const fetchData = async (): Promise<string | null> => {
@@ -657,20 +667,18 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   fetchRequestsRef.current = fetchRequests;
 
   useEffect(() => {
-    if (!online) return;
+    if (!online || !providerProfileId) return;
     const channel = supabase
-      .channel('bookings:waiting')
+      .channel('booking_offers:provider')
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
-          table: 'bookings',
-          filter: 'status=eq.waiting',
+          table: 'booking_offers',
+          filter: `provider_id=eq.${providerProfileId}`,
         },
-        (payload) => {
-          const newBooking = payload.new as BookingRequest;
-          setNewReservation(newBooking);
+        () => {
           fetchRequestsRef.current();
         },
       )
@@ -679,17 +687,22 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         {
           event: 'UPDATE',
           schema: 'public',
-          table: 'bookings',
+          table: 'booking_offers',
+          filter: `provider_id=eq.${providerProfileId}`,
         },
-        (payload) => {
-          const updated = payload.new as { id?: string; status?: string };
-          // Skip re-fetching when the update is to the provider's own accepted
-          // booking — that would race with fetchActiveBooking and briefly clear
-          // the active reservation from the UI. The active job state is managed
-          // exclusively by fetchActiveBooking, not by fetchRequests.
-          if (updated?.id && acceptedBookingRef.current?.id === updated.id) {
-            return;
-          }
+        () => {
+          fetchRequestsRef.current();
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'booking_offers',
+          filter: `provider_id=eq.${providerProfileId}`,
+        },
+        () => {
           fetchRequestsRef.current();
         },
       )
@@ -697,7 +710,19 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [online]);
+  }, [online, providerProfileId]);
+
+  // Poll every 10 seconds to remove expired offers from the list.
+  // Realtime covers INSERT/UPDATE/DELETE, but expiry is time-based
+  // and needs a periodic re-fetch to drop offers whose expires_at
+  // has passed.
+  useEffect(() => {
+    if (!online || !providerProfileId) return;
+    const interval = setInterval(() => {
+      fetchRequestsRef.current();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [online, providerProfileId]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -876,6 +901,15 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       fetchRequests();
       return;
     }
+
+    // Mark the accepting provider's offer as accepted and all other
+    // pending offers for this booking as accepted_elsewhere. Uses the
+    // secure RPC because RLS prevents clients from setting those
+    // statuses directly.
+    await supabase.rpc('mark_booking_offer_accepted', {
+      p_booking_id: bookingId,
+      p_provider_id: providerProfileId,
+    });
 
     const acceptedReq = requests.find(r => r.id === bookingId) ?? null;
     setAcceptingId(null);
@@ -1743,25 +1777,24 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     if (!profile || !providerProfileId || rejectingId) return;
     setRejectingId(bookingId);
     try {
+      // Update the booking_offer status to rejected. RLS allows
+      // pending → rejected from the client (Sprint 1 policy).
       const { error } = await supabase
-        .from('booking_rejections')
-        .insert({ booking_id: bookingId, provider_id: providerProfileId });
+        .from('booking_offers')
+        .update({ status: 'rejected', responded_at: new Date().toISOString() })
+        .eq('booking_id', bookingId)
+        .eq('provider_id', providerProfileId)
+        .eq('status', 'pending');
       if (error) {
-        // 23505 = unique_violation — already rejected, treat as success.
-        if (error.code !== '23505') {
-          console.error('[reject] insert failed:', {
-            code: error.code,
-            message: error.message,
-            details: error.details,
-            hint: error.hint,
-          });
-          showToast(t('provider.errRejectFailed'), 'error');
-          setRejectingId(null);
-          return;
-        }
+        console.error('[reject] offer update failed:', {
+          code: error.code,
+          message: error.message,
+        });
+        showToast(t('provider.errRejectFailed'), 'error');
+        setRejectingId(null);
+        return;
       }
       // Only remove the card after the DB write succeeds.
-      setRejectedBookingIds(prev => new Set(prev).add(bookingId));
       setRequests(prev => prev.filter(r => r.id !== bookingId));
       showToast(t('provider.successRejected'), 'success');
     } catch (err) {
