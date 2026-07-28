@@ -367,6 +367,8 @@ export const tr = {
     errBookingGone: 'Rezervasyon artık mevcut değil',
     errAlreadyAccepted: 'Bu rezervasyon başka bir yıkayıcı tarafından kabul edildi.',
     errConflict: 'Bu saat dilimiyle çakışan başka rezervasyonunuz var',
+    errActiveJob: 'Devam eden bir işiniz varken başka bir rezervasyonu kabul edemezsiniz.',
+    errMultipleActiveJobs: 'Tutarsız aktif iş verisi tespit edildi. Lütfen destekle iletişime geçin.',
     errAcceptFailed: 'Rezervasyon kabul edilemedi. Lütfen tekrar deneyin.',
     successAccepted: 'Rezervasyon başarıyla kabul edildi!',
     errOpenMap: 'Harita açılamadı',

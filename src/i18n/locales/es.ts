@@ -367,6 +367,8 @@ export const es = {
     errBookingGone: 'La reserva ya no existe',
     errAlreadyAccepted: 'Esta reserva ya fue aceptada por otro socio',
     errConflict: 'Tienes otra reserva que se superpone con este horario',
+    errActiveJob: 'No puedes aceptar otra reserva mientras tienes un trabajo activo.',
+    errMultipleActiveJobs: 'Se detectaron datos de trabajos activos inconsistentes. Por favor contacta a soporte.',
     errAcceptFailed: 'Error al aceptar reserva. Por favor reinténtalo.',
     successAccepted: '¡Reserva aceptada correctamente!',
     errOpenMap: 'No se pudo abrir el mapa',

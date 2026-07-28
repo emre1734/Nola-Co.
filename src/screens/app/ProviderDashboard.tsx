@@ -283,6 +283,46 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // entire job lifecycle (only the jobs table status advances), so we
   // can query for it and rebuild the active-job UI state.
   const fetchActiveBooking = useCallback(async (ppId: string) => {
+    // Query the jobs table directly for active jobs owned by this provider.
+    // This is the source of truth — not the edge function, not React state.
+    // We detect multiple active jobs explicitly and refuse to pick an
+    // arbitrary one.
+    const ACTIVE_JOB_STATUSES = ['on_the_way', 'arrived', 'started', 'pending_approval'];
+    const { data: activeJobs, error: jobsError } = await supabase
+      .from('jobs')
+      .select('id, status, booking_id, before_photo_url, after_photo_url, provider_id, provider_closed_at')
+      .eq('provider_id', ppId)
+      .in('status', ACTIVE_JOB_STATUSES)
+      .order('created_at', { ascending: false });
+
+    if (jobsError) {
+      console.error('[fetchActiveBooking] jobs query failed:', {
+        code: jobsError.code,
+        message: jobsError.message,
+      });
+      return;
+    }
+
+    if (!activeJobs || activeJobs.length === 0) {
+      return;
+    }
+
+    if (activeJobs.length > 1) {
+      // Multiple active jobs for one provider is an inconsistent state.
+      // Do NOT pick an arbitrary one. Log a production-safe error and show
+      // a safe error state.
+      console.error('[fetchActiveBooking] multiple active jobs found for provider', {
+        provider_id: ppId,
+        count: activeJobs.length,
+        job_ids: activeJobs.map(j => j.id),
+      });
+      showToast(tRef.current('provider.errMultipleActiveJobs'), 'error');
+      return;
+    }
+
+    const job = activeJobs[0];
+
+    // Fetch the booking details for this job so the UI can display them.
     const { data: activeBooking, error: bookingQueryError } = await supabase
       .from('bookings')
       .select(`
@@ -292,14 +332,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         vehicles!bookings_vehicle_id_fkey(brand, model, plate, color),
         services!bookings_service_id_fkey(name, base_price)
       `)
-      .eq('status', 'accepted')
-      .eq('provider_id', ppId)
-      .order('accepted_at', { ascending: false })
-      .limit(1)
+      .eq('id', job.booking_id)
       .maybeSingle();
 
     if (bookingQueryError) {
-      console.error('[fetchActiveBooking] query failed:', {
+      console.error('[fetchActiveBooking] booking query failed:', {
         code: bookingQueryError.code,
         message: bookingQueryError.message,
       });
@@ -310,62 +347,37 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
     setAcceptedBooking(activeBooking as BookingRequest);
 
-    try {
-      const { data: jobState } = await supabase.functions.invoke('job-progress', {
-        body: { booking_id: (activeBooking as BookingRequest).id, action: 'get_state' },
-      });
-      if (!jobState) return;
-      const job = jobState as {
-        id?: string;
-        status?: string;
-        provider_id?: string;
-        before_photo_url?: string | null;
-        after_photo_url?: string | null;
-        provider_closed_at?: string | null;
-      } | null;
-      // If the completed job was already closed by this provider, do not
-      // rebuild the active-job card — it must stay cleared across refreshes.
-      if (job?.id && job.status === 'completed' && job.provider_closed_at) {
-        setAcceptedBooking(null);
-        setActiveJob(null);
-        return;
-      }
-      if (job?.id) {
-        setActiveJob({
-          id: job.id,
-          status: job.status ?? '',
-          provider_id: job.provider_id ?? '',
-          before_photo_url: job.before_photo_url ?? null,
-          after_photo_url: job.after_photo_url ?? null,
-          provider_closed_at: job.provider_closed_at ?? null,
-        });
-        const st = job.status ?? '';
-        if (['on_the_way', 'arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
-          setOnMyWayDone(true);
-        }
-        if (['arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
-          setArrivedDone(true);
-        }
-        if (['started', 'pending_approval', 'completed'].includes(st)) {
-          setStartWashDone(true);
-        }
-        if (['pending_approval', 'completed'].includes(st)) {
-          setSendApprovalDone(true);
-        }
-        if (st === 'completed') {
-          setCustomerApproved(true);
-        }
-        if (job.before_photo_url) {
-          setPhotoPreview(job.before_photo_url);
-          setPhotoUploaded(true);
-        }
-        if (job.after_photo_url) {
-          setAfterPhotoPreview(job.after_photo_url);
-          setAfterPhotoUploaded(true);
-        }
-      }
-    } catch {
-      // non-fatal — UI shows the accepted booking without step state
+    setActiveJob({
+      id: job.id,
+      status: job.status ?? '',
+      provider_id: job.provider_id ?? '',
+      before_photo_url: job.before_photo_url ?? null,
+      after_photo_url: job.after_photo_url ?? null,
+      provider_closed_at: job.provider_closed_at ?? null,
+    });
+    const st = job.status ?? '';
+    if (['on_the_way', 'arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
+      setOnMyWayDone(true);
+    }
+    if (['arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
+      setArrivedDone(true);
+    }
+    if (['started', 'pending_approval', 'completed'].includes(st)) {
+      setStartWashDone(true);
+    }
+    if (['pending_approval', 'completed'].includes(st)) {
+      setSendApprovalDone(true);
+    }
+    if (st === 'completed') {
+      setCustomerApproved(true);
+    }
+    if (job.before_photo_url) {
+      setPhotoPreview(job.before_photo_url);
+      setPhotoUploaded(true);
+    }
+    if (job.after_photo_url) {
+      setAfterPhotoPreview(job.after_photo_url);
+      setAfterPhotoUploaded(true);
     }
   }, []);
 
@@ -520,6 +532,32 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       setAcceptingId(null);
       showToast(t('provider.errAlreadyAccepted'), 'error');
       fetchRequests();
+      return;
+    }
+
+    // Single Active Job Rule: the database is the source of truth. Before
+    // accepting any new booking, query the jobs table for an existing active
+    // job owned by this provider. If one exists, block acceptance — regardless
+    // of time-slot overlap. One provider may have at most one active job.
+    const { data: activeJobs, error: activeJobsError } = await supabase
+      .from('jobs')
+      .select('id, status, booking_id')
+      .eq('provider_id', providerProfileId)
+      .in('status', ['on_the_way', 'arrived', 'started', 'pending_approval']);
+
+    if (activeJobsError) {
+      console.error('[accept] active-job check failed:', {
+        code: activeJobsError.code,
+        message: activeJobsError.message,
+      });
+      setAcceptingId(null);
+      showToast(t('provider.errStatusRetry'), 'error');
+      return;
+    }
+
+    if (activeJobs && activeJobs.length > 0) {
+      setAcceptingId(null);
+      showToast(t('provider.errActiveJob'), 'error');
       return;
     }
 
@@ -995,26 +1033,32 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     setPhotoUploading(true);
     setPhotoError(null);
     try {
-      // 1. Fetch the job ID via get_state (edge function validates ownership).
-      const { data: stateData, error: stateError } = await supabase.functions.invoke('job-progress', {
-        body: { booking_id: acceptedBooking.id, action: 'get_state' },
-      });
-      if (stateError || !stateData) {
-        const err = stateError as { code?: string; message?: string } | null;
-        console.error('[before-photo] get_state failed:', {
-          code: err?.code,
-          message: err?.message,
+      // 1. Use the active job ID directly — this is the exact job displayed
+      //    in the UI and restored from the database. Fall back to get_state
+      //    only if activeJob.id is missing (defensive).
+      let jobId = activeJob?.id;
+      if (!jobId) {
+        const { data: stateData, error: stateError } = await supabase.functions.invoke('job-progress', {
+          body: { booking_id: acceptedBooking.id, action: 'get_state' },
         });
-        setPhotoError(t('provider.errVerifyJob'));
-        showToast(t('provider.errVerifyJob'), 'error');
-        return;
+        if (stateError || !stateData) {
+          const err = stateError as { code?: string; message?: string } | null;
+          console.error('[before-photo] get_state fallback failed:', {
+            code: err?.code,
+            message: err?.message,
+          });
+          setPhotoError(t('provider.errVerifyJob'));
+          showToast(t('provider.errVerifyJob'), 'error');
+          return;
+        }
+        jobId = (stateData as { id?: string }).id;
       }
-      const jobId = (stateData as { id?: string }).id;
       if (!jobId) {
         setPhotoError(t('provider.errJobNotFound'));
         showToast(t('provider.errJobNotFound'), 'error');
         return;
       }
+      console.debug('[before-photo] using jobId:', jobId);
 
       // 2. Upload to Storage using {userId}/{jobId}/before-{ts}.{ext}
       const { url, path, error: uploadErr } = await uploadJobPhoto(
@@ -1245,26 +1289,32 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     setAfterPhotoError(null);
     setAfterUploadResult(null);
     try {
-      // 1. Fetch the job via get_state (edge function validates ownership).
-      const { data: stateData, error: stateError } = await supabase.functions.invoke('job-progress', {
-        body: { booking_id: acceptedBooking.id, action: 'get_state' },
-      });
-      if (stateError || !stateData) {
-        const err = stateError as { code?: string; message?: string } | null;
-        console.error('[after-photo] get_state failed:', {
-          code: err?.code,
-          message: err?.message,
+      // 1. Use the active job ID directly — this is the exact job displayed
+      //    in the UI and restored from the database. Fall back to get_state
+      //    only if activeJob.id is missing (defensive).
+      let jobId = activeJob?.id;
+      if (!jobId) {
+        const { data: stateData, error: stateError } = await supabase.functions.invoke('job-progress', {
+          body: { booking_id: acceptedBooking.id, action: 'get_state' },
         });
-        setAfterPhotoError(t('provider.errVerifyJob'));
-        showToast(t('provider.errVerifyJob'), 'error');
-        return;
+        if (stateError || !stateData) {
+          const err = stateError as { code?: string; message?: string } | null;
+          console.error('[after-photo] get_state fallback failed:', {
+            code: err?.code,
+            message: err?.message,
+          });
+          setAfterPhotoError(t('provider.errVerifyJob'));
+          showToast(t('provider.errVerifyJob'), 'error');
+          return;
+        }
+        jobId = (stateData as { id?: string }).id;
       }
-      const jobId = (stateData as { id?: string }).id;
       if (!jobId) {
         setAfterPhotoError(t('provider.errJobNotFound'));
         showToast(t('provider.errJobNotFound'), 'error');
         return;
       }
+      console.debug('[after-photo] using jobId:', jobId);
 
       // 2. Upload to Storage using {userId}/{jobId}/after-{ts}.{ext}
       const { url, path, error: uploadErr } = await uploadJobPhoto(

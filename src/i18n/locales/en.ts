@@ -367,6 +367,8 @@ export const en = {
     errBookingGone: 'Booking no longer exists',
     errAlreadyAccepted: 'This booking was already accepted by another partner',
     errConflict: 'You have another booking that overlaps with this time slot',
+    errActiveJob: 'You cannot accept another booking while you have an active job.',
+    errMultipleActiveJobs: 'Inconsistent active job data detected. Please contact support.',
     errAcceptFailed: 'Failed to accept booking. Please try again.',
     successAccepted: 'Booking accepted successfully!',
     errOpenMap: 'Could not open map',
