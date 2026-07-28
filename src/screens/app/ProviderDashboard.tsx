@@ -182,6 +182,12 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // Stale-request guard: only the latest fetch may write to state.
   const fetchSeqRef = useRef(0);
 
+  // Ref mirror of acceptedBooking so the realtime UPDATE callback can check
+  // whether a booking update belongs to the provider's own active booking
+  // without depending on state (which would make the effect re-subscribe).
+  const acceptedBookingRef = useRef<BookingRequest | null>(null);
+  acceptedBookingRef.current = acceptedBooking;
+
   const fetchRequests = useCallback(async () => {
     if (!profile) return;
     const seq = ++fetchSeqRef.current;
@@ -282,11 +288,13 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // The booking stays "accepted" in the bookings table throughout the
   // entire job lifecycle (only the jobs table status advances), so we
   // can query for it and rebuild the active-job UI state.
+  //
+  // CRITICAL: This function must NEVER clear acceptedBooking/activeJob state.
+  // It only SETS state when a confirmed database result is found. A transient
+  // empty fetch (network glitch, timing race) must not wipe the active job.
+  // Clearing only happens when the booking is confirmed gone (cancelled/expired)
+  // or when handleCloseCompletedJob succeeds.
   const fetchActiveBooking = useCallback(async (ppId: string) => {
-    // Query the jobs table directly for active jobs owned by this provider.
-    // This is the source of truth — not the edge function, not React state.
-    // We detect multiple active jobs explicitly and refuse to pick an
-    // arbitrary one.
     const ACTIVE_JOB_STATUSES = ['on_the_way', 'arrived', 'started', 'pending_approval'];
     const { data: activeJobs, error: jobsError } = await supabase
       .from('jobs')
@@ -303,7 +311,41 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       return;
     }
 
+    // No active job in the jobs table. Before returning, check if the provider
+    // has an accepted booking that hasn't transitioned to a job yet (the job is
+    // created when the provider clicks "On My Way"). If so, restore the
+    // acceptedBooking from the bookings table — do NOT clear it.
     if (!activeJobs || activeJobs.length === 0) {
+      const { data: acceptedBookingRow, error: acceptedErr } = await supabase
+        .from('bookings')
+        .select(`
+          id, customer_id, customer_note, address, created_at, scheduled_at,
+          estimated_price, latitude, longitude, booking_date, booking_time, extra_services,
+          profiles!bookings_customer_id_fkey(full_name),
+          vehicles!bookings_vehicle_id_fkey(brand, model, plate, color),
+          services!bookings_service_id_fkey(name, base_price)
+        `)
+        .eq('provider_id', ppId)
+        .eq('status', 'accepted')
+        .order('accepted_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (acceptedErr) {
+        console.error('[fetchActiveBooking] accepted booking query failed:', {
+          code: acceptedErr.code,
+          message: acceptedErr.message,
+        });
+        return;
+      }
+
+      if (acceptedBookingRow) {
+        setAcceptedBooking(acceptedBookingRow as BookingRequest);
+        setActiveJob(null);
+      }
+      // If no accepted booking found either, leave existing state intact —
+      // do NOT clear. The caller may have a valid in-progress job that hasn't
+      // been committed to the DB yet (race window between accept and on_my_way).
       return;
     }
 
@@ -446,10 +488,15 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           schema: 'public',
           table: 'bookings',
         },
-        () => {
-          // Any booking update may change eligibility (accepted elsewhere,
-          // rejected, cancelled, etc.). Re-fetch authoritative data from the
-          // database instead of manually mutating local state.
+        (payload) => {
+          const updated = payload.new as { id?: string; status?: string };
+          // Skip re-fetching when the update is to the provider's own accepted
+          // booking — that would race with fetchActiveBooking and briefly clear
+          // the active reservation from the UI. The active job state is managed
+          // exclusively by fetchActiveBooking, not by fetchRequests.
+          if (updated?.id && acceptedBookingRef.current?.id === updated.id) {
+            return;
+          }
           fetchRequestsRef.current();
         },
       )
