@@ -167,6 +167,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // render — it only depends on whether we have an active booking.
   const locationWatchRef = useRef<ReturnType<typeof navigator.geolocation.watchPosition> | null>(null);
   const lastLocationSentRef = useRef(0);
+  const lastLatRef = useRef<number | null>(null);
+  const lastLngRef = useRef<number | null>(null);
 
   // Stable ref for the translation function so callbacks that need it don't
   // change identity every render (t is recreated each render by useTranslation).
@@ -757,6 +759,9 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         navigator.geolocation.clearPosition(locationWatchRef.current);
         locationWatchRef.current = null;
       }
+      lastLatRef.current = null;
+      lastLngRef.current = null;
+      lastLocationSentRef.current = 0;
       // Clear stored coordinates so no stale location is visible after arrival.
       if (providerProfileId) {
         supabase
@@ -769,26 +774,50 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       return;
     }
 
+    // Guard against duplicate watchers — only one may exist at a time.
+    if (locationWatchRef.current != null) return;
+
     locationWatchRef.current = navigator.geolocation.watchPosition(
       (pos) => {
-        const now = Date.now();
+        const { latitude, longitude } = pos.coords;
+
+        // Ignore tiny GPS drift (< 10 meters) to avoid unnecessary writes.
+        // 0.0001 degrees ≈ 11 meters at the equator.
+        if (
+          lastLatRef.current != null &&
+          lastLngRef.current != null &&
+          Math.abs(latitude - lastLatRef.current) < 0.0001 &&
+          Math.abs(longitude - lastLngRef.current) < 0.0001
+        ) {
+          return;
+        }
+
         // Throttle to max one write per 4 seconds to match the customer's
         // polling interval and avoid hammering the database.
+        const now = Date.now();
         if (now - lastLocationSentRef.current < 4000) return;
+
+        lastLatRef.current = latitude;
+        lastLngRef.current = longitude;
         lastLocationSentRef.current = now;
+
         supabase
           .from('provider_profiles')
           .update({
-            current_latitude: pos.coords.latitude,
-            current_longitude: pos.coords.longitude,
+            current_latitude: latitude,
+            current_longitude: longitude,
           })
           .eq('id', providerProfileId)
           .then(() => {})
           .catch(() => {});
       },
-      () => {
-        // GPS error — non-fatal. The customer will see "unavailable" from
-        // the RPC returning null coordinates.
+      (err) => {
+        // Permission denied — surface once via toast, do not crash or retry.
+        if (err.code === err.PERMISSION_DENIED) {
+          showToast(t('provider.errGpsDenied'), 'error');
+        }
+        // Position unavailable or timeout — non-fatal. The browser will
+        // retry automatically when a new position becomes available.
       },
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
     );
@@ -799,7 +828,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         locationWatchRef.current = null;
       }
     };
-  }, [onMyWayDone, arrivedDone, acceptedBooking, providerProfileId]);
+  }, [onMyWayDone, arrivedDone, acceptedBooking, providerProfileId, showToast, t]);
 
   // Fetch any existing before_photo_url for the active job so the step
   // stays completed across refreshes. Also captures full job state for

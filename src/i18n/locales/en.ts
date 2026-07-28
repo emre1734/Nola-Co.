@@ -395,6 +395,7 @@ export const en = {
     errBeforeRequiredForAfter: 'A before photo is required before saving the after photo.',
     successSentApproval: 'Sent for customer approval',
     errJobNotArrived: 'Job is no longer in the arrived state.',
+    errGpsDenied: 'Location permission denied. The customer cannot track your live location.',
     errBeforeRequiredForWash: 'A before photo is required before starting the wash.',
     errAfterRequiredForApproval: 'An after photo is required before sending for approval.',
     errBeforeRequiredForApproval: 'A before photo is required before sending for approval.',

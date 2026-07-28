@@ -395,6 +395,7 @@ export const es = {
     errBeforeRequiredForAfter: 'Se requiere una foto anterior antes de guardar la foto posterior.',
     successSentApproval: 'Enviado para aprobación del cliente',
     errJobNotArrived: 'El trabajo ya no está en estado llegado.',
+    errGpsDenied: 'Permiso de ubicación denegado. El cliente no puede rastrear tu ubicación en vivo.',
     errBeforeRequiredForWash: 'Se requiere una foto anterior antes de iniciar el lavado.',
     errAfterRequiredForApproval: 'Se requiere una foto posterior antes de enviar para aprobación.',
     errBeforeRequiredForApproval: 'Se requiere una foto anterior antes de enviar para aprobación.',

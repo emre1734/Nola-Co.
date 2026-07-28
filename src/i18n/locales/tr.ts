@@ -395,6 +395,7 @@ export const tr = {
     errBeforeRequiredForAfter: 'Sonrası fotoğrafını kaydetmek için bir öncesi fotoğrafı gereklidir.',
     successSentApproval: 'Müşteri onayına gönderildi',
     errJobNotArrived: 'İş artık gelmiş durumda değil.',
+    errGpsDenied: 'Konum izni reddedildi. Müşteri canlı konumunuzu takip edemiyor.',
     errBeforeRequiredForWash: 'Yıkamayı başlatmak için bir öncesi fotoğrafı gereklidir.',
     errAfterRequiredForApproval: 'Onaya göndermek için bir sonrası fotoğrafı gereklidir.',
     errBeforeRequiredForApproval: 'Onaya göndermek için bir öncesi fotoğrafı gereklidir.',
