@@ -175,6 +175,10 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const tRef = useRef(t);
   tRef.current = t;
 
+  // Stable ref for showToast so the GPS effect doesn't depend on it directly.
+  const showToastRef = useRef(showToast);
+  showToastRef.current = showToast;
+
   // Stale-request guard: only the latest fetch may write to state.
   const fetchSeqRef = useRef(0);
 
@@ -753,15 +757,26 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // tracking map can poll them. Starts when onMyWayDone becomes true, stops
   // when arrivedDone becomes true or the booking is cleared. Coordinates
   // are cleared on stop so no stale location remains.
+  // Uses refs for showToast/t to avoid re-running on every render (t is
+  // recreated each render by useTranslation, which would cause an infinite
+  // effect loop).
   useEffect(() => {
-    if (!onMyWayDone || arrivedDone || !acceptedBooking || !providerProfileId) {
-      if (locationWatchRef.current != null) {
-        navigator.geolocation.clearPosition(locationWatchRef.current);
-        locationWatchRef.current = null;
+    const stopWatcher = () => {
+      if (locationWatchRef.current != null && navigator.geolocation) {
+        try {
+          navigator.geolocation.clearPosition(locationWatchRef.current);
+        } catch {
+          // clearWatch must never throw
+        }
       }
+      locationWatchRef.current = null;
       lastLatRef.current = null;
       lastLngRef.current = null;
       lastLocationSentRef.current = 0;
+    };
+
+    if (!onMyWayDone || arrivedDone || !acceptedBooking || !providerProfileId) {
+      stopWatcher();
       // Clear stored coordinates so no stale location is visible after arrival.
       if (providerProfileId) {
         supabase
@@ -777,58 +792,67 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     // Guard against duplicate watchers — only one may exist at a time.
     if (locationWatchRef.current != null) return;
 
-    locationWatchRef.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords;
+    // Guard against environments without geolocation support.
+    if (!navigator.geolocation || !navigator.geolocation.watchPosition) return;
 
-        // Ignore tiny GPS drift (< 10 meters) to avoid unnecessary writes.
-        // 0.0001 degrees ≈ 11 meters at the equator.
-        if (
-          lastLatRef.current != null &&
-          lastLngRef.current != null &&
-          Math.abs(latitude - lastLatRef.current) < 0.0001 &&
-          Math.abs(longitude - lastLngRef.current) < 0.0001
-        ) {
-          return;
-        }
+    try {
+      locationWatchRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
 
-        // Throttle to max one write per 4 seconds to match the customer's
-        // polling interval and avoid hammering the database.
-        const now = Date.now();
-        if (now - lastLocationSentRef.current < 4000) return;
+          // Ignore tiny GPS drift (< 10 meters) to avoid unnecessary writes.
+          // 0.0001 degrees ≈ 11 meters at the equator.
+          if (
+            lastLatRef.current != null &&
+            lastLngRef.current != null &&
+            Math.abs(latitude - lastLatRef.current) < 0.0001 &&
+            Math.abs(longitude - lastLngRef.current) < 0.0001
+          ) {
+            return;
+          }
 
-        lastLatRef.current = latitude;
-        lastLngRef.current = longitude;
-        lastLocationSentRef.current = now;
+          // Throttle to max one write per 4 seconds to match the customer's
+          // polling interval and avoid hammering the database.
+          const now = Date.now();
+          if (now - lastLocationSentRef.current < 4000) return;
 
-        supabase
-          .from('provider_profiles')
-          .update({
-            current_latitude: latitude,
-            current_longitude: longitude,
-          })
-          .eq('id', providerProfileId)
-          .then(() => {})
-          .catch(() => {});
-      },
-      (err) => {
-        // Permission denied — surface once via toast, do not crash or retry.
-        if (err.code === err.PERMISSION_DENIED) {
-          showToast(t('provider.errGpsDenied'), 'error');
-        }
-        // Position unavailable or timeout — non-fatal. The browser will
-        // retry automatically when a new position becomes available.
-      },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
-    );
+          lastLatRef.current = latitude;
+          lastLngRef.current = longitude;
+          lastLocationSentRef.current = now;
+
+          supabase
+            .from('provider_profiles')
+            .update({
+              current_latitude: latitude,
+              current_longitude: longitude,
+            })
+            .eq('id', providerProfileId)
+            .then(() => {})
+            .catch(() => {});
+        },
+        (err) => {
+          // Permission denied (code 1) — surface once via toast, do not crash.
+          if (err.code === 1) {
+            try {
+              showToastRef.current(tRef.current('provider.errGpsDenied'), 'error');
+            } catch {
+              // toast must never throw
+            }
+          }
+          // Position unavailable or timeout — non-fatal. The browser will
+          // retry automatically when a new position becomes available.
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+      );
+    } catch {
+      // watchPosition must never throw — if it does, fail silently.
+      locationWatchRef.current = null;
+    }
 
     return () => {
-      if (locationWatchRef.current != null) {
-        navigator.geolocation.clearPosition(locationWatchRef.current);
-        locationWatchRef.current = null;
-      }
+      stopWatcher();
     };
-  }, [onMyWayDone, arrivedDone, acceptedBooking, providerProfileId, showToast, t]);
+  }, [onMyWayDone, arrivedDone, acceptedBooking, providerProfileId]);
 
   // Fetch any existing before_photo_url for the active job so the step
   // stays completed across refreshes. Also captures full job state for
