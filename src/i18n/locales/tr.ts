@@ -524,7 +524,7 @@ export const tr = {
     loading: 'Yükleniyor...',
     trackingCardTitle: 'Washer\u2019\u0131n\u0131z Yolda',
     trackingCardDesc: 'Washer\u2019\u0131n\u0131z\u0131n canl\u0131 konumunu haritada takip edebilirsiniz.',
-    trackingCardBtn: 'Canl\u0131 Konumu \u0130zle',
+    trackingCardBtn: '🗺️ Canlı Konumu Takip Et',
     extraTireShine: 'Lastik Parlatma',
     extraWindowProtection: 'Cam Koruma',
     extraCeramicSpray: 'Seramik Sprey',

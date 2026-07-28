@@ -524,7 +524,7 @@ export const en = {
     loading: 'Loading...',
     trackingCardTitle: 'Your Washer Is on the Way',
     trackingCardDesc: "Track your Washer's live location on the map.",
-    trackingCardBtn: 'Track Live Location',
+    trackingCardBtn: '🗺️ Track Live Location',
     extraTireShine: 'Tire Shine',
     extraWindowProtection: 'Window Protection',
     extraCeramicSpray: 'Ceramic Spray',

@@ -524,7 +524,7 @@ export const es = {
     loading: 'Cargando...',
     trackingCardTitle: 'Tu lavador est\u00e1 en camino',
     trackingCardDesc: 'Sigue la ubicaci\u00f3n en vivo de tu lavador en el mapa.',
-    trackingCardBtn: 'Ver ubicaci\u00f3n en vivo',
+    trackingCardBtn: '🗺️ Ver ubicación en vivo',
     extraTireShine: 'Brillo para Llantas',
     extraWindowProtection: 'Protección de Cristales',
     extraCeramicSpray: 'Spray Cerámico',

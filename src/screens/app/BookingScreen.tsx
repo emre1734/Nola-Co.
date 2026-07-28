@@ -348,7 +348,7 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
           <View style={styles.trackingCard}>
             <View style={styles.trackingCardHeader}>
               <View style={styles.trackingIconWrap}>
-                <Text style={styles.trackingIcon}>🚗</Text>
+                <Text style={styles.trackingIcon}>📍</Text>
               </View>
               <View style={styles.trackingCardInfo}>
                 <Text style={styles.trackingCardTitle}>{t('booking.trackingCardTitle')}</Text>
