@@ -86,6 +86,24 @@ function haversineKm(
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+interface EdgeFnErrorBody {
+  error?: string;
+  current_status?: string;
+  expected_status?: string;
+}
+
+async function parseEdgeFnError(error: unknown): Promise<EdgeFnErrorBody | null> {
+  const ctx = (error as { context?: unknown }).context;
+  if (ctx && typeof ctx === 'object' && 'json' in ctx && typeof (ctx as { json: unknown }).json === 'function') {
+    try {
+      return (await (ctx as Response).json()) as EdgeFnErrorBody;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps) {
   const { profile, session, signOut } = useAuth();
   const { showToast } = useToast();
@@ -908,7 +926,17 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           details: err.details,
           hint: err.hint,
         });
-        showToast(t('provider.errStatusRetry'), 'error');
+        const body = await parseEdgeFnError(error);
+        const currentStatus = body?.current_status ?? '';
+        if (currentStatus === 'completed' || currentStatus === 'cancelled') {
+          showToast(t('provider.errJobAlreadyDone'), 'error');
+          setAcceptedBooking(null);
+          setActiveJob(null);
+        } else if (body?.error) {
+          showToast(t('provider.errJobStatusMismatch', { current: currentStatus, expected: body?.expected_status ?? '' }), 'error');
+        } else {
+          showToast(t('provider.errStatusRetry'), 'error');
+        }
         return;
       }
       // Refresh the booking from the server
@@ -968,7 +996,17 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           details: err.details,
           hint: err.hint,
         });
-        showToast(t('provider.errStatusRetry'), 'error');
+        const body = await parseEdgeFnError(error);
+        const currentStatus = body?.current_status ?? '';
+        if (currentStatus === 'completed' || currentStatus === 'cancelled') {
+          showToast(t('provider.errJobAlreadyDone'), 'error');
+          setAcceptedBooking(null);
+          setActiveJob(null);
+        } else if (body?.error) {
+          showToast(t('provider.errJobStatusMismatch', { current: currentStatus, expected: body?.expected_status ?? '' }), 'error');
+        } else {
+          showToast(t('provider.errStatusRetry'), 'error');
+        }
         return;
       }
       const { data: refreshed, error: refreshError } = await supabase

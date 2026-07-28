@@ -375,6 +375,8 @@ export const en = {
     errOpenMap: 'Could not open map',
     errNoCoords: 'No location coordinates available for this booking',
     errStatusRetry: 'Failed to update status. Please try again.',
+    errJobAlreadyDone: 'This job appears to already be completed. Refreshing.',
+    errJobStatusMismatch: 'Job status is "{{current}}" — expected "{{expected}}". Please refresh.',
     errBookingCancelled: 'Booking was cancelled by the customer.',
     errBookingExpired: 'Booking has expired.',
     successOnMyWay: "You're on your way!",

@@ -1306,15 +1306,23 @@ Deno.serve(async (req: Request) => {
     }
 
     if (existingJob) {
-      if (action === "arrived" && existingJob.status !== "on_the_way") {
+      // Idempotent: if the job is already in the target status (e.g. double
+      // click), succeed without re-writing. This prevents spurious 409s for
+      // the common double-tap case.
+      if (existingJob.status === jobStatus) {
         return new Response(
-          JSON.stringify({ error: `Job status is ${existingJob.status}, expected on_the_way` }),
-          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          JSON.stringify({ success: true, status: jobStatus, idempotent: true }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
-      if (action === "on_my_way" && existingJob.status !== "on_the_way" && existingJob.status !== "cancelled") {
+      // Validate the job is in the expected previous status.
+      if (existingJob.status !== requiredPreviousStatus) {
         return new Response(
-          JSON.stringify({ error: `Job already in status ${existingJob.status}` }),
+          JSON.stringify({
+            error: `Job status is ${existingJob.status}, expected ${requiredPreviousStatus}`,
+            current_status: existingJob.status,
+            expected_status: requiredPreviousStatus,
+          }),
           { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }

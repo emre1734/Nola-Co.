@@ -375,6 +375,8 @@ export const es = {
     errOpenMap: 'No se pudo abrir el mapa',
     errNoCoords: 'No hay coordenadas de ubicación disponibles para esta reserva',
     errStatusRetry: 'Error al actualizar estado. Por favor reinténtalo.',
+    errJobAlreadyDone: 'Este trabajo parece ya estar completado. Actualizando.',
+    errJobStatusMismatch: 'El estado del trabajo es "{{current}}" — se esperaba "{{expected}}". Por favor refresca.',
     errBookingCancelled: 'La reserva fue cancelada por el cliente.',
     errBookingExpired: 'La reserva ha expirado.',
     successOnMyWay: '¡Vas en camino!',

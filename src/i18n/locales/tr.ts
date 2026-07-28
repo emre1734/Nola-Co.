@@ -375,6 +375,8 @@ export const tr = {
     errOpenMap: 'Harita açılamadı',
     errNoCoords: 'Bu rezervasyon için konum koordinatları yok',
     errStatusRetry: 'Durum güncellenemedi. Lütfen tekrar deneyin.',
+    errJobAlreadyDone: 'Bu iş zaten tamamlanmış görünüyor, sayfa yenileniyor.',
+    errJobStatusMismatch: 'İş durumu "{{current}}" — "{{expected}}" olması bekleniyordu. Lütfen sayfayı yenileyin.',
     errBookingCancelled: 'Rezervasyon müşteri tarafından iptal edildi.',
     errBookingExpired: 'Rezervasyon süresi doldu.',
     successOnMyWay: 'Yola çıktınız!',
