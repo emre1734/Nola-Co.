@@ -162,6 +162,12 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // Closing a customer-approved completed job.
   const [closingJob, setClosingJob] = useState(false);
 
+  // Live GPS broadcast while the washer is "on the way". We use a ref so the
+  // effect that starts/stops the broadcast doesn't need to re-create on every
+  // render — it only depends on whether we have an active booking.
+  const locationWatchRef = useRef<ReturnType<typeof navigator.geolocation.watchPosition> | null>(null);
+  const lastLocationSentRef = useRef(0);
+
   // Stable ref for the translation function so callbacks that need it don't
   // change identity every render (t is recreated each render by useTranslation).
   const tRef = useRef(t);
@@ -739,6 +745,61 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       setArrivedUpdating(false);
     }
   };
+
+  // Live GPS broadcast: while the washer is "on the way", watch their GPS
+  // position and write coordinates to provider_profiles so the customer's
+  // tracking map can poll them. Starts when onMyWayDone becomes true, stops
+  // when arrivedDone becomes true or the booking is cleared. Coordinates
+  // are cleared on stop so no stale location remains.
+  useEffect(() => {
+    if (!onMyWayDone || arrivedDone || !acceptedBooking || !providerProfileId) {
+      if (locationWatchRef.current != null) {
+        navigator.geolocation.clearPosition(locationWatchRef.current);
+        locationWatchRef.current = null;
+      }
+      // Clear stored coordinates so no stale location is visible after arrival.
+      if (providerProfileId) {
+        supabase
+          .from('provider_profiles')
+          .update({ current_latitude: null, current_longitude: null })
+          .eq('id', providerProfileId)
+          .then(() => {})
+          .catch(() => {});
+      }
+      return;
+    }
+
+    locationWatchRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        const now = Date.now();
+        // Throttle to max one write per 4 seconds to match the customer's
+        // polling interval and avoid hammering the database.
+        if (now - lastLocationSentRef.current < 4000) return;
+        lastLocationSentRef.current = now;
+        supabase
+          .from('provider_profiles')
+          .update({
+            current_latitude: pos.coords.latitude,
+            current_longitude: pos.coords.longitude,
+          })
+          .eq('id', providerProfileId)
+          .then(() => {})
+          .catch(() => {});
+      },
+      () => {
+        // GPS error — non-fatal. The customer will see "unavailable" from
+        // the RPC returning null coordinates.
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+    );
+
+    return () => {
+      if (locationWatchRef.current != null) {
+        navigator.geolocation.clearPosition(locationWatchRef.current);
+        locationWatchRef.current = null;
+      }
+    };
+  }, [onMyWayDone, arrivedDone, acceptedBooking, providerProfileId]);
 
   // Fetch any existing before_photo_url for the active job so the step
   // stays completed across refreshes. Also captures full job state for

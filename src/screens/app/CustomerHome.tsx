@@ -43,6 +43,11 @@ interface ActiveBooking extends BookingItem {
 
 const TRACKABLE_STATUSES = ['accepted', 'on_the_way'];
 
+interface JobRow {
+  booking_id: string;
+  status: string;
+}
+
 export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
   const { t } = useTranslation();
   const { profile, signOut } = useAuth();
@@ -54,6 +59,7 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
   const [activeBooking, setActiveBooking] = useState<ActiveBooking | null>(null);
+  const [activeJobStatus, setActiveJobStatus] = useState<string | null>(null);
   const [trackingBookingId, setTrackingBookingId] = useState<string | null>(null);
 
   const fetchData = async () => {
@@ -80,14 +86,56 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
     setBookings((bkData as BookingItem[]) ?? []);
     if (activeErr || !activeData) {
       setActiveBooking(null);
+      setActiveJobStatus(null);
     } else {
-      setActiveBooking(activeData as ActiveBooking);
+      const booking = activeData as ActiveBooking;
+      setActiveBooking(booking);
+      // Fetch the job status for this booking — the 'on_the_way' status lives
+      // on the jobs table, not the bookings table.
+      if (booking.provider_id) {
+        const { data: jobData } = await supabase
+          .from('jobs')
+          .select('booking_id, status')
+          .eq('booking_id', booking.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        setActiveJobStatus((jobData as JobRow | null)?.status ?? null);
+      } else {
+        setActiveJobStatus(null);
+      }
     }
   };
 
   useEffect(() => {
     fetchData().finally(() => setLoadingData(false));
   }, []);
+
+  // Realtime: listen for job status changes on the active booking so the
+  // Track button appears/disappears immediately when the washer presses
+  // On My Way or Arrived — without requiring a manual refresh.
+  useEffect(() => {
+    if (!activeBooking) return;
+    const channel = supabase
+      .channel(`job-status-track:${activeBooking.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'jobs',
+          filter: `booking_id=eq.${activeBooking.id}`,
+        },
+        (payload) => {
+          const updated = payload.new as { status: string };
+          setActiveJobStatus(updated.status);
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeBooking?.id]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -111,7 +159,11 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
     return map[s] ?? colors.textMuted;
   };
 
-  const canTrack = activeBooking?.status === 'on_the_way' && !!activeBooking.provider_id;
+  // Track button appears only when: booking has an assigned washer AND the
+  // job status (from the jobs table) is 'on_the_way'. Booking status stays
+  // 'accepted' throughout the job lifecycle — the 'on_the_way' status lives
+  // on the jobs table, so we must check activeJobStatus, not booking status.
+  const canTrack = !!activeBooking?.provider_id && activeJobStatus === 'on_the_way';
 
   if (loadingData) return <Loading fullScreen message={t('customerHome.loading')} />;
 
