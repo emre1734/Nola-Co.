@@ -22,7 +22,7 @@ interface CustomerOnboardingScreenProps {
 }
 
 export function CustomerOnboardingScreen({ onComplete }: CustomerOnboardingScreenProps) {
-  const { session, updateProfile, refreshProfile } = useAuth();
+  const { session, refreshProfile } = useAuth();
   const { showToast } = useToast();
   const { t } = useTranslation();
 
@@ -73,6 +73,7 @@ export function CustomerOnboardingScreen({ onComplete }: CustomerOnboardingScree
       full_name: fullName.trim(),
       phone: phone.trim(),
       email: session.user.email,
+      city: city.trim(),
       ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
       updated_at: new Date().toISOString(),
     });

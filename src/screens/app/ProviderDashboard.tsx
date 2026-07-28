@@ -149,7 +149,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const [afterPhotoUploading, setAfterPhotoUploading] = useState(false);
   const [afterPhotoError, setAfterPhotoError] = useState<string | null>(null);
   const [afterPhotoUploaded, setAfterPhotoUploaded] = useState(false);
-  const [afterUploadResult, setAfterUploadResult] = useState<string | null>(null);
+
 
   // Send for Customer Approval state
   const [sendApprovalUpdating, setSendApprovalUpdating] = useState(false);
@@ -802,7 +802,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     const stopWatcher = () => {
       if (locationWatchRef.current != null && navigator.geolocation) {
         try {
-          navigator.geolocation.clearPosition(locationWatchRef.current);
+          navigator.geolocation.clearWatch(locationWatchRef.current);
         } catch {
           // clearWatch must never throw
         }
@@ -922,6 +922,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           provider_id: job.provider_id ?? '',
           before_photo_url: job.before_photo_url ?? null,
           after_photo_url: job.after_photo_url ?? null,
+          provider_closed_at: null,
         });
       }
       const url = job?.before_photo_url ?? null;
@@ -1287,7 +1288,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     if (!afterPhotoFile || !acceptedBooking || !profile || afterPhotoUploading) return;
     setAfterPhotoUploading(true);
     setAfterPhotoError(null);
-    setAfterUploadResult(null);
+
     try {
       // 1. Use the active job ID directly — this is the exact job displayed
       //    in the UI and restored from the database. Fall back to get_state
@@ -1359,7 +1360,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         showToast(msg, 'error');
         return;
       }
-      setAfterUploadResult(JSON.stringify(saveData));
+
 
       // 4. Re-fetch the job to confirm after_photo_url is persisted.
       const { data: confirmed, error: confirmError } = await supabase.functions.invoke('job-progress', {
@@ -1416,7 +1417,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     setAfterPhotoUploaded(false);
     setAfterPhotoFile(null);
     setAfterPhotoPreview(null);
-    setAfterUploadResult(null);
+
   };
 
   const handleStartWash = async () => {
@@ -1806,18 +1807,6 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
                   </View>
                 )}
 
-                {/* DEBUG — temporary */}
-                <View style={styles.debugPanel}>
-                  <Text style={styles.debugTitle}>{t('provider.debugTitle')}</Text>
-                  <Text style={styles.debugRow}>{t('provider.debugJobId')}{activeJob?.id ?? t('provider.debugNull')}</Text>
-                  <Text style={styles.debugRow}>{t('provider.debugJobStatus')}{activeJob?.status ?? t('provider.debugNull')}</Text>
-                  <Text style={styles.debugRow} numberOfLines={2}>
-                    {t('provider.debugAfterUrl')}{activeJob?.after_photo_url ?? t('provider.debugNull')}
-                  </Text>
-                  <Text style={styles.debugRow} numberOfLines={2}>
-                    {t('provider.debugUploadResult')}{afterUploadResult ?? '—'}
-                  </Text>
-                </View>
               </View>
             )}
 
@@ -2644,25 +2633,6 @@ const styles = StyleSheet.create({
     color: colors.success,
     fontSize: 13,
     fontWeight: '500',
-  },
-  debugPanel: {
-    backgroundColor: '#f3f4f6',
-    borderRadius: radii.md,
-    padding: spacing.sm,
-    marginTop: spacing.sm,
-    borderWidth: 1,
-    borderColor: '#d1d5db',
-  },
-  debugTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  debugRow: {
-    fontSize: 11,
-    color: '#374151',
-    lineHeight: 16,
   },
   startWashBtn: {
     backgroundColor: colors.primary,
