@@ -1091,12 +1091,19 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     if (locationWatchRef.current != null) return;
 
     // Guard against environments without geolocation support.
-    if (!navigator.geolocation || !navigator.geolocation.watchPosition) return;
+    if (!navigator.geolocation || !navigator.geolocation.watchPosition) {
+      console.log('[GPS] navigator.geolocation or watchPosition not available');
+      return;
+    }
+
+    console.log('[GPS] watchPosition starting', { providerProfileId, acceptedBookingId: acceptedBooking?.id });
 
     try {
       locationWatchRef.current = navigator.geolocation.watchPosition(
         (pos) => {
+          console.log('[GPS] success callback entered');
           const { latitude, longitude } = pos.coords;
+          console.log('[GPS] latitude:', latitude, 'longitude:', longitude);
 
           // Ignore tiny GPS drift (< 10 meters) to avoid unnecessary writes.
           // 0.0001 degrees ≈ 11 meters at the equator.
@@ -1118,6 +1125,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           lastLngRef.current = longitude;
           lastLocationSentRef.current = now;
 
+          console.log('[GPS] database update starting', { providerProfileId, latitude, longitude });
           supabase
             .from('provider_profiles')
             .update({
@@ -1125,10 +1133,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
               current_longitude: longitude,
             })
             .eq('id', providerProfileId)
-            .then(() => {})
-            .catch(() => {});
+            .then(() => { console.log('[GPS] database update success'); })
+            .catch((e) => { console.log('[GPS] database update failed', e); });
         },
         (err) => {
+          console.log('[GPS] error callback', { code: err.code, message: err.message });
           // Permission denied (code 1) — surface once via toast, do not crash.
           if (err.code === 1) {
             try {
@@ -1142,8 +1151,18 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         },
         { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
       );
-    } catch {
+      console.log('[GPS] watchPosition registered successfully', { watchId: locationWatchRef.current });
+      if (navigator.permissions) {
+        navigator.permissions.query({ name: 'geolocation' as PermissionName }).then((p) => {
+          console.log('[GPS] permission state:', p.state);
+          if (p.state === 'granted') console.log('[GPS] permission granted');
+        }).catch(() => { console.log('[GPS] permissions.query failed'); });
+      } else {
+        console.log('[GPS] navigator.permissions not available');
+      }
+    } catch (e) {
       // watchPosition must never throw — if it does, fail silently.
+      console.log('[GPS] watchPosition threw', e);
       locationWatchRef.current = null;
     }
 
