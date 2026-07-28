@@ -18,6 +18,7 @@ import { GoogleMapView } from '../../components/map/GoogleMapView';
 import { DateTimePicker } from '../../components/DateTimePicker';
 import type { ReverseGeocodeResult } from '../../lib/google-maps';
 import { useTranslation } from '../../i18n/useTranslation';
+import { WasherTrackingMap } from '../../components/WasherTrackingMap';
 
 interface BookingScreenProps {
   onBack: () => void;
@@ -92,6 +93,12 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
   const [acceptedPrecautions, setAcceptedPrecautions] = useState(false);
   const [legalView, setLegalView] = useState<'serviceInfo' | 'precautions' | null>(null);
 
+  // Tracking card: shown when the customer has an active booking whose job
+  // status is exactly 'on_the_way'. This is a shortcut to the existing
+  // WasherTrackingMap — it does NOT participate in the booking wizard.
+  const [trackingBookingId, setTrackingBookingId] = useState<string | null>(null);
+  const [showTrackingMap, setShowTrackingMap] = useState(false);
+
   const SERVICE_INFO_SECTIONS: LegalSection[] = [
     {
       heading: t('booking.legal.includedTitle'),
@@ -152,13 +159,74 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
     setServices((sData as Service[]) ?? []);
   }, [showToast]);
 
+  // Check whether the customer has an active booking with job status
+  // 'on_the_way'. Uses the service-role-free RLS-protected query — the
+  // customer can only see their own bookings.
+  const fetchTrackingBooking = useCallback(async () => {
+    if (!session) return;
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('customer_id', session.user.id)
+      .eq('status', 'accepted')
+      .not('provider_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (error || !data || data.length === 0) {
+      setTrackingBookingId(null);
+      return;
+    }
+    const bookingIds = data.map(b => b.id);
+    const { data: jobs, error: jobErr } = await supabase
+      .from('jobs')
+      .select('id, booking_id, status')
+      .in('booking_id', bookingIds)
+      .eq('status', 'on_the_way')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (jobErr || !jobs || jobs.length === 0) {
+      setTrackingBookingId(null);
+      return;
+    }
+    setTrackingBookingId(jobs[0].booking_id);
+  }, [session]);
+
+  // Realtime: listen for job status changes to auto-close the tracking
+  // modal and hide the card when the washer arrives or the job ends.
+  useEffect(() => {
+    if (!trackingBookingId) return;
+    const channel = supabase
+      .channel(`booking-tracking:${trackingBookingId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'jobs',
+          filter: `booking_id=eq.${trackingBookingId}`,
+        },
+        (payload) => {
+          const updated = payload.new as { status: string };
+          if (updated.status !== 'on_the_way') {
+            setShowTrackingMap(false);
+            setTrackingBookingId(null);
+          }
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [trackingBookingId]);
+
   useEffect(() => {
     fetchData().finally(() => setLoading(false));
-  }, [fetchData]);
+    fetchTrackingBooking();
+  }, [fetchData, fetchTrackingBooking]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchData();
+    await Promise.all([fetchData(), fetchTrackingBooking()]);
     setRefreshing(false);
   };
 
@@ -271,6 +339,32 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
           </Text>
         ))}
       </View>
+
+      {/* Tracking card — shown only when the customer has an active booking
+          with job status 'on_the_way'. Sits between the step indicator and
+          the booking wizard content. Does NOT participate in the wizard. */}
+      {trackingBookingId && (
+        <View style={styles.trackingCardWrap}>
+          <View style={styles.trackingCard}>
+            <View style={styles.trackingCardHeader}>
+              <View style={styles.trackingIconWrap}>
+                <Text style={styles.trackingIcon}>🚗</Text>
+              </View>
+              <View style={styles.trackingCardInfo}>
+                <Text style={styles.trackingCardTitle}>{t('booking.trackingCardTitle')}</Text>
+                <Text style={styles.trackingCardDesc}>{t('booking.trackingCardDesc')}</Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={styles.trackingBtn}
+              onPress={() => setShowTrackingMap(true)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.trackingBtnText}>{t('booking.trackingCardBtn')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {/* Step: Select Location — map renders outside ScrollView for proper touch */}
       {STEPS[step] === 'Location' && !bookingLocation && (
@@ -598,6 +692,13 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
           onClose={() => setLegalView(null)}
         />
       )}
+
+      {showTrackingMap && trackingBookingId && (
+        <WasherTrackingMap
+          bookingId={trackingBookingId}
+          onClose={() => setShowTrackingMap(false)}
+        />
+      )}
     </View>
   );
 }
@@ -807,5 +908,55 @@ const styles = StyleSheet.create({
   legalTitle: {
     ...typography.caption, color: colors.textMuted, fontWeight: '700',
     textTransform: 'uppercase', letterSpacing: 1, marginBottom: spacing.xs,
+  },
+
+  // Tracking card
+  trackingCardWrap: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+  },
+  trackingCard: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    borderWidth: 1.5,
+    borderColor: colors.primary + '40',
+  },
+  trackingCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginBottom: spacing.md,
+  },
+  trackingIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: radii.md,
+    backgroundColor: colors.primary + '18',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  trackingIcon: { fontSize: 22 },
+  trackingCardInfo: { flex: 1 },
+  trackingCardTitle: {
+    ...typography.h4,
+    marginBottom: 2,
+  },
+  trackingCardDesc: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
+  trackingBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radii.lg,
+    paddingVertical: 12,
+    paddingHorizontal: spacing.lg,
+    alignItems: 'center',
+  },
+  trackingBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
   },
 });
