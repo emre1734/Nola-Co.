@@ -1271,28 +1271,6 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Single Active Job Guard: before creating or updating any job, verify
-    // this provider does not already have a different active job. The
-    // database is the source of truth — React state is not trusted.
-    const { data: providerActiveJobs } = await supabase
-      .from("jobs")
-      .select("id, booking_id, status")
-      .eq("provider_id", providerProfile.id)
-      .in("status", ["on_the_way", "arrived", "started", "pending_approval"]);
-
-    if (providerActiveJobs && providerActiveJobs.length > 0) {
-      // Allow the action only if the existing active job belongs to THIS
-      // booking (i.e. the provider is advancing their own job through the
-      // workflow). If a different booking's job is active, block it.
-      const sameBookingActive = providerActiveJobs.some(j => j.booking_id === booking_id);
-      if (!sameBookingActive) {
-        return new Response(
-          JSON.stringify({ error: "You cannot accept another booking while you have an active job." }),
-          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
-    }
-
     // Find or create the job row for this booking. Use ordered query + limit
     // instead of maybeSingle() — if duplicate rows exist, maybeSingle() returns
     // a 406 error and the old code silently inserted ANOTHER duplicate.
