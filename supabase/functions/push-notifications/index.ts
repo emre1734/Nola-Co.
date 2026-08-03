@@ -533,6 +533,21 @@ Deno.serve(async (req: Request) => {
         );
       }
 
+      // Dispatch Wave 1: create booking_offers for the closest eligible
+      // providers. This RPC is SECURITY DEFINER and server-only (EXECUTE
+      // revoked from anon/authenticated), so it must be called here from
+      // the edge function using the service role key. It is idempotent —
+      // if offers already exist for this booking, it returns without
+      // creating duplicates or extending expiry.
+      const { data: dispatchResult, error: dispatchError } = await supabase
+        .rpc("dispatch_booking_wave_one", { p_booking_id: booking_id });
+
+      if (dispatchError) {
+        console.error("dispatch_booking_wave_one failed:", dispatchError);
+      } else {
+        console.log("dispatch_booking_wave_one result:", dispatchResult);
+      }
+
       // Find eligible providers: role=provider, notifications enabled,
       // has location, and is "available" or "online".
       let providerQuery = supabase
