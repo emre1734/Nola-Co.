@@ -131,6 +131,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const [rejectedBookingIds, setRejectedBookingIds] = useState<Set<string>>(new Set());
   const [acceptedBooking, setAcceptedBooking] = useState<BookingRequest | null>(null);
   const [providerMissing, setProviderMissing] = useState(false);
+  const [multiJobError, setMultiJobError] = useState(false);
   const [onMyWayUpdating, setOnMyWayUpdating] = useState(false);
   const [onMyWayDone, setOnMyWayDone] = useState(false);
   const [arrivedUpdating, setArrivedUpdating] = useState(false);
@@ -205,6 +206,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // without depending on state (which would make the effect re-subscribe).
   const acceptedBookingRef = useRef<BookingRequest | null>(null);
   acceptedBookingRef.current = acceptedBooking;
+
+  // Generation counter: incremented when handleAccept succeeds. A stale
+  // fetchActiveBooking that started before a new acceptance will see its
+  // captured generation is outdated and must not overwrite acceptedBooking.
+  const acceptGenRef = useRef(0);
 
   const fetchRequests = useCallback(async () => {
     if (!profile || !providerProfileId) return;
@@ -323,6 +329,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // Clearing only happens when the booking is confirmed gone (cancelled/expired)
   // or when handleCloseCompletedJob succeeds.
   const fetchActiveBooking = useCallback(async (ppId: string) => {
+    const gen = acceptGenRef.current;
     const ACTIVE_JOB_STATUSES = ['on_the_way', 'arrived', 'started', 'pending_approval'];
     const { data: activeJobs, error: jobsError } = await supabase
       .from('jobs')
@@ -387,6 +394,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         const bookingIdsWithJobs = new Set((existingJobs ?? []).map(j => j.booking_id));
         validBooking = acceptedBookings.find(b => !bookingIdsWithJobs.has(b.id)) ?? null;
 
+        if (gen !== acceptGenRef.current) return;
+
         // If the currently displayed acceptedBooking is stale (its job has
         // progressed), clear it now — don't wait for another realtime event.
         if (
@@ -413,6 +422,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           });
           return;
         }
+        if (gen !== acceptGenRef.current) return;
         if (staleJob && staleJob.length > 0) {
           setAcceptedBooking(null);
           setActiveJob(null);
@@ -452,6 +462,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
             .eq('id', matchingJob.booking_id)
             .maybeSingle();
 
+          if (gen !== acceptGenRef.current) return;
           if (!bookingQueryError && activeBooking) {
             setAcceptedBooking(activeBooking as BookingRequest);
             setActiveJob({
@@ -495,6 +506,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
             .select('id, status')
             .eq('booking_id', currentBookingId)
             .limit(1);
+          if (gen !== acceptGenRef.current) return;
           if (staleJob && staleJob.length > 0) {
             setAcceptedBooking(null);
             setActiveJob(null);
@@ -507,60 +519,19 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           // If no job row at all, it's freshly accepted — leave alone.
         }
       } else {
-        // No current acceptedBooking — pick the most recent active job
-        // and restore state from it. Log the inconsistency for diagnosis.
-        console.warn('[fetchActiveBooking] multiple active jobs, restoring most recent', {
+        // No current acceptedBooking and multiple active jobs — inconsistent
+        // data. Do NOT pick an arbitrary row. Log the job IDs and show a safe
+        // error so the user can contact support for cleanup.
+        console.error('[fetchActiveBooking] multiple active jobs, no current acceptedBooking', {
           provider_id: ppId,
           count: activeJobs.length,
+          job_ids: activeJobs.map(j => j.id),
+          booking_ids: activeJobs.map(j => j.booking_id),
         });
-        const recentJob = activeJobs[0];
-        const { data: recentBooking, error: recentBookingErr } = await supabase
-          .from('bookings')
-          .select(`
-            id, customer_id, customer_note, address, created_at, scheduled_at,
-            estimated_price, latitude, longitude, booking_date, booking_time, extra_services,
-            profiles!bookings_customer_id_fkey(full_name),
-            vehicles!bookings_vehicle_id_fkey(brand, model, plate, color),
-            services!bookings_service_id_fkey(name, base_price)
-          `)
-          .eq('id', recentJob.booking_id)
-          .maybeSingle();
-
-        if (!recentBookingErr && recentBooking) {
-          setAcceptedBooking(recentBooking as BookingRequest);
-          setActiveJob({
-            id: recentJob.id,
-            status: recentJob.status ?? '',
-            provider_id: recentJob.provider_id ?? '',
-            before_photo_url: recentJob.before_photo_url ?? null,
-            after_photo_url: recentJob.after_photo_url ?? null,
-            provider_closed_at: recentJob.provider_closed_at ?? null,
-          });
-          const st = recentJob.status ?? '';
-          if (['on_the_way', 'arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
-            setOnMyWayDone(true);
-          }
-          if (['arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
-            setArrivedDone(true);
-          }
-          if (['started', 'pending_approval', 'completed'].includes(st)) {
-            setStartWashDone(true);
-          }
-          if (['pending_approval', 'completed'].includes(st)) {
-            setSendApprovalDone(true);
-          }
-          if (st === 'completed') {
-            setCustomerApproved(true);
-          }
-          if (recentJob.before_photo_url) {
-            setPhotoPreview(recentJob.before_photo_url);
-            setPhotoUploaded(true);
-          }
-          if (recentJob.after_photo_url) {
-            setAfterPhotoPreview(recentJob.after_photo_url);
-            setAfterPhotoUploaded(true);
-          }
-        }
+        if (gen !== acceptGenRef.current) return;
+        setMultiJobError(true);
+        setAcceptedBooking(null);
+        setActiveJob(null);
       }
       return;
     }
@@ -589,6 +560,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     }
 
     if (!activeBooking) return;
+
+    if (gen !== acceptGenRef.current) return;
 
     setAcceptedBooking(activeBooking as BookingRequest);
 
@@ -913,6 +886,25 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
     const acceptedReq = requests.find(r => r.id === bookingId) ?? null;
     setAcceptingId(null);
+    // Increment generation counter so any in-flight fetchActiveBooking
+    // that started before this acceptance cannot overwrite the new booking.
+    acceptGenRef.current++;
+    // Reset all workflow state from any previous job so old flags don't
+    // leak into the newly accepted booking.
+    setActiveJob(null);
+    setOnMyWayDone(false);
+    setArrivedDone(false);
+    setStartWashDone(false);
+    setSendApprovalDone(false);
+    setCustomerApproved(false);
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    setPhotoUploaded(false);
+    setPhotoError(null);
+    setAfterPhotoFile(null);
+    setAfterPhotoPreview(null);
+    setAfterPhotoUploaded(false);
+    setAfterPhotoError(null);
     setAcceptedBooking(acceptedReq);
     showToast(t('provider.successAccepted'), 'success');
     setRequests(prev => prev.filter(r => r.id !== bookingId));
@@ -1831,6 +1823,24 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         <ErrorState
           message={t('provider.errNoProfile')}
           onRetry={onBack}
+        />
+      </View>
+    );
+  }
+
+  if (multiJobError) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.topBar}>
+          <TouchableOpacity style={styles.backBtn} onPress={onBack}>
+            <Text style={styles.backIcon}>‹</Text>
+          </TouchableOpacity>
+          <Text style={styles.topTitle}>{t('provider.title')}</Text>
+          <View style={styles.topBarSpacer} />
+        </View>
+        <ErrorState
+          message={t('provider.errMultipleActiveJobs')}
+          onRetry={onRefresh}
         />
       </View>
     );
