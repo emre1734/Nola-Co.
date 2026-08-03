@@ -144,15 +144,23 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const [photoUploaded, setPhotoUploaded] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
 
-  // Active job state (from get_state) — used for Start Wash + After Photo visibility
+  // Active job state — a genuine jobs row in a blocking active status
+  // (on_the_way, arrived, started, pending_approval). Terminal statuses are
+  // NEVER restored here.
   const [activeJob, setActiveJob] = useState<{
     id: string;
     status: string;
     provider_id: string;
+    booking_id: string;
     before_photo_url: string | null;
     after_photo_url: string | null;
     provider_closed_at: string | null;
   } | null>(null);
+
+  // Booking details for the active job (fetched from the bookings table).
+  // Only populated when activeJob is set. This keeps acceptedBooking
+  // exclusively for newly accepted bookings that have no job row yet.
+  const [activeJobBooking, setActiveJobBooking] = useState<BookingRequest | null>(null);
 
   // The provider_profiles.id for the authenticated user — jobs.provider_id
   // references provider_profiles.id, NOT profiles.id.
@@ -206,6 +214,17 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // without depending on state (which would make the effect re-subscribe).
   const acceptedBookingRef = useRef<BookingRequest | null>(null);
   acceptedBookingRef.current = acceptedBooking;
+
+  // Ref mirror of providerProfileId for account-switch detection in
+  // fetchActiveBooking. If the provider changes mid-fetch, stale results
+  // are discarded.
+  const providerProfileIdRef = useRef<string | null>(null);
+  providerProfileIdRef.current = providerProfileId;
+
+  // The booking to display in the active job card. When a genuine active
+  // job exists, use its booking details (activeJobBooking). Otherwise fall
+  // back to a newly accepted booking waiting for "On My Way".
+  const displayBooking = activeJob ? activeJobBooking : acceptedBooking;
 
   // Generation counter: incremented when handleAccept succeeds. A stale
   // fetchActiveBooking that started before a new acceptance will see its
@@ -318,25 +337,34 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     return (providerData as { id: string }).id;
   };
 
-  // Restore an in-progress active booking on mount or refresh.
-  // The booking stays "accepted" in the bookings table throughout the
-  // entire job lifecycle (only the jobs table status advances), so we
-  // can query for it and rebuild the active-job UI state.
+  // STATE PRIORITY (deterministic, single source of truth):
+  //   1. activeJob        — a genuine jobs row in a blocking active status
+  //   2. acceptedBooking  — a newly accepted booking with no job row yet
+  //   3. requests         — pending booking_offers
+  //   4. empty ready state
   //
-  // CRITICAL: This function must NEVER clear acceptedBooking/activeJob state.
-  // It only SETS state when a confirmed database result is found. A transient
-  // empty fetch (network glitch, timing race) must not wipe the active job.
-  // Clearing only happens when the booking is confirmed gone (cancelled/expired)
-  // or when handleCloseCompletedJob succeeds.
+  // Old terminal or abandoned reservations are never restored as active.
+  // A pending offer never overwrites a genuine active job.
+  // A stale active-job fetch never overwrites a newer accepted booking.
+  //
+  // Stale async protection: every invocation captures the current generation
+  // counter and provider id. Before applying results we verify:
+  //   - the generation hasn't changed (a newer accept happened)
+  //   - the provider hasn't switched accounts
+  //   - the result is still the latest request
   const fetchActiveBooking = useCallback(async (ppId: string) => {
     const gen = acceptGenRef.current;
     const ACTIVE_JOB_STATUSES = ['on_the_way', 'arrived', 'started', 'pending_approval'];
+
     const { data: activeJobs, error: jobsError } = await supabase
       .from('jobs')
       .select('id, status, booking_id, before_photo_url, after_photo_url, provider_id, provider_closed_at')
       .eq('provider_id', ppId)
       .in('status', ACTIVE_JOB_STATUSES)
       .order('created_at', { ascending: false });
+
+    // Stale guard: provider switched accounts or a newer accept happened.
+    if (gen !== acceptGenRef.current || providerProfileIdRef.current !== ppId) return;
 
     if (jobsError) {
       console.error('[fetchActiveBooking] jobs query failed:', {
@@ -346,14 +374,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       return;
     }
 
-    // No active job in the jobs table. Before returning, check if the provider
-    // has an accepted booking that hasn't transitioned to a job yet (the job is
-    // created when the provider clicks "On My Way"). Only restore bookings
-    // that have NO job row — a booking whose job has already progressed to
-    // on_the_way/arrived/started/pending_approval/completed/cancelled must not
-    // show the "On My Way" button (the edge function would reject it with 409).
-    if (!activeJobs || activeJobs.length === 0) {
-      const { data: acceptedBookings, error: acceptedErr } = await supabase
+    // ── Priority 1: genuine active job ──────────────────────────────
+    if (activeJobs && activeJobs.length === 1) {
+      const job = activeJobs[0];
+
+      const { data: activeBooking, error: bookingQueryError } = await supabase
         .from('bookings')
         .select(`
           id, customer_id, customer_note, address, created_at, scheduled_at,
@@ -362,184 +387,74 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           vehicles!bookings_vehicle_id_fkey(brand, model, plate, color),
           services!bookings_service_id_fkey(name, base_price)
         `)
-        .eq('provider_id', ppId)
-        .eq('status', 'accepted')
-        .order('accepted_at', { ascending: false });
+        .eq('id', job.booking_id)
+        .maybeSingle();
 
-      if (acceptedErr) {
-        console.error('[fetchActiveBooking] accepted booking query failed:', {
-          code: acceptedErr.code,
-          message: acceptedErr.message,
+      if (gen !== acceptGenRef.current || providerProfileIdRef.current !== ppId) return;
+
+      if (bookingQueryError) {
+        console.error('[fetchActiveBooking] booking query failed:', {
+          code: bookingQueryError.code,
+          message: bookingQueryError.message,
         });
         return;
       }
+      if (!activeBooking) return;
 
-      // Filter out bookings that already have a job row.
-      let validBooking: BookingRequest | null = null;
-      if (acceptedBookings && acceptedBookings.length > 0) {
-        const bookingIds = acceptedBookings.map(b => b.id);
-        const { data: existingJobs, error: jobsLookupError } = await supabase
-          .from('jobs')
-          .select('id, booking_id')
-          .in('booking_id', bookingIds);
+      // Set activeJob + its booking details. Do NOT touch acceptedBooking —
+      // a restored job must never contaminate the accepted-booking slot.
+      setActiveJob({
+        id: job.id,
+        status: job.status ?? '',
+        provider_id: job.provider_id ?? '',
+        booking_id: job.booking_id,
+        before_photo_url: job.before_photo_url ?? null,
+        after_photo_url: job.after_photo_url ?? null,
+        provider_closed_at: job.provider_closed_at ?? null,
+      });
+      setActiveJobBooking(activeBooking as BookingRequest);
+      setAcceptedBooking(null);
 
-        if (jobsLookupError) {
-          console.error('[fetchActiveBooking] job lookup for accepted bookings failed:', {
-            code: jobsLookupError.code,
-            message: jobsLookupError.message,
-          });
-          return;
-        }
-
-        const bookingIdsWithJobs = new Set((existingJobs ?? []).map(j => j.booking_id));
-        validBooking = acceptedBookings.find(b => !bookingIdsWithJobs.has(b.id)) ?? null;
-
-        if (gen !== acceptGenRef.current) return;
-
-        // If the currently displayed acceptedBooking is stale (its job has
-        // progressed), clear it now — don't wait for another realtime event.
-        if (
-          !validBooking &&
-          acceptedBookingRef.current &&
-          bookingIdsWithJobs.has(acceptedBookingRef.current.id)
-        ) {
-          setAcceptedBooking(null);
-          setActiveJob(null);
-        }
-      } else if (acceptedBookingRef.current) {
-        // No accepted bookings at all. Check if the current acceptedBooking
-        // has a job row — if so, it's stale and must be cleared. If not, leave
-        // it intact (race window between accept and on_my_way).
-        const { data: staleJob, error: staleJobError } = await supabase
-          .from('jobs')
-          .select('id')
-          .eq('booking_id', acceptedBookingRef.current.id)
-          .limit(1);
-        if (staleJobError) {
-          console.error('[fetchActiveBooking] stale job check failed:', {
-            code: staleJobError.code,
-            message: staleJobError.message,
-          });
-          return;
-        }
-        if (gen !== acceptGenRef.current) return;
-        if (staleJob && staleJob.length > 0) {
-          setAcceptedBooking(null);
-          setActiveJob(null);
-        }
+      // Restore workflow flags from the genuine job status.
+      const st = job.status ?? '';
+      setOnMyWayDone(['on_the_way', 'arrived', 'started', 'pending_approval'].includes(st));
+      setArrivedDone(['arrived', 'started', 'pending_approval'].includes(st));
+      setStartWashDone(['started', 'pending_approval'].includes(st));
+      setSendApprovalDone(st === 'pending_approval');
+      setCustomerApproved(false);
+      if (job.before_photo_url) {
+        setPhotoPreview(job.before_photo_url);
+        setPhotoUploaded(true);
       }
-
-      if (validBooking) {
-        setAcceptedBooking(validBooking as BookingRequest);
-        setActiveJob(null);
+      if (job.after_photo_url) {
+        setAfterPhotoPreview(job.after_photo_url);
+        setAfterPhotoUploaded(true);
       }
       return;
     }
 
-    if (activeJobs.length > 1) {
-      // Multiple active jobs — inconsistent state. Try to find the job
-      // matching the current acceptedBooking. If found, restore state
-      // from it. If not, check whether the current acceptedBooking is
-      // freshly accepted (no job at all — valid, leave alone) or stale
-      // (job progressed to completion/cancellation — clear it).
-      const currentBookingId = acceptedBookingRef.current?.id;
-
-      if (currentBookingId) {
-        const matchingJob = activeJobs.find(j => j.booking_id === currentBookingId);
-
-        if (matchingJob) {
-          // The current acceptedBooking has an active job — restore
-          // state from it so the UI reflects the true job status.
-          const { data: activeBooking, error: bookingQueryError } = await supabase
-            .from('bookings')
-            .select(`
-              id, customer_id, customer_note, address, created_at, scheduled_at,
-              estimated_price, latitude, longitude, booking_date, booking_time, extra_services,
-              profiles!bookings_customer_id_fkey(full_name),
-              vehicles!bookings_vehicle_id_fkey(brand, model, plate, color),
-              services!bookings_service_id_fkey(name, base_price)
-            `)
-            .eq('id', matchingJob.booking_id)
-            .maybeSingle();
-
-          if (gen !== acceptGenRef.current) return;
-          if (!bookingQueryError && activeBooking) {
-            setAcceptedBooking(activeBooking as BookingRequest);
-            setActiveJob({
-              id: matchingJob.id,
-              status: matchingJob.status ?? '',
-              provider_id: matchingJob.provider_id ?? '',
-              before_photo_url: matchingJob.before_photo_url ?? null,
-              after_photo_url: matchingJob.after_photo_url ?? null,
-              provider_closed_at: matchingJob.provider_closed_at ?? null,
-            });
-            const st = matchingJob.status ?? '';
-            if (['on_the_way', 'arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
-              setOnMyWayDone(true);
-            }
-            if (['arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
-              setArrivedDone(true);
-            }
-            if (['started', 'pending_approval', 'completed'].includes(st)) {
-              setStartWashDone(true);
-            }
-            if (['pending_approval', 'completed'].includes(st)) {
-              setSendApprovalDone(true);
-            }
-            if (st === 'completed') {
-              setCustomerApproved(true);
-            }
-            if (matchingJob.before_photo_url) {
-              setPhotoPreview(matchingJob.before_photo_url);
-              setPhotoUploaded(true);
-            }
-            if (matchingJob.after_photo_url) {
-              setAfterPhotoPreview(matchingJob.after_photo_url);
-              setAfterPhotoUploaded(true);
-            }
-          }
-        } else {
-          // Current acceptedBooking doesn't match any active job.
-          // Check if it has any job row at all — if so, it's stale.
-          const { data: staleJob } = await supabase
-            .from('jobs')
-            .select('id, status')
-            .eq('booking_id', currentBookingId)
-            .limit(1);
-          if (gen !== acceptGenRef.current) return;
-          if (staleJob && staleJob.length > 0) {
-            setAcceptedBooking(null);
-            setActiveJob(null);
-            setOnMyWayDone(false);
-            setArrivedDone(false);
-            setStartWashDone(false);
-            setSendApprovalDone(false);
-            setCustomerApproved(false);
-          }
-          // If no job row at all, it's freshly accepted — leave alone.
-        }
-      } else {
-        // No current acceptedBooking and multiple active jobs — inconsistent
-        // data. Do NOT pick an arbitrary row. Log the job IDs and show a safe
-        // error so the user can contact support for cleanup.
-        console.error('[fetchActiveBooking] multiple active jobs, no current acceptedBooking', {
-          provider_id: ppId,
-          count: activeJobs.length,
-          job_ids: activeJobs.map(j => j.id),
-          booking_ids: activeJobs.map(j => j.booking_id),
-        });
-        if (gen !== acceptGenRef.current) return;
-        setMultiJobError(true);
-        setAcceptedBooking(null);
-        setActiveJob(null);
-      }
+    if (activeJobs && activeJobs.length > 1) {
+      console.error('[fetchActiveBooking] multiple active jobs', {
+        provider_id: ppId,
+        count: activeJobs.length,
+        job_ids: activeJobs.map(j => j.id),
+        booking_ids: activeJobs.map(j => j.booking_id),
+      });
+      if (gen !== acceptGenRef.current || providerProfileIdRef.current !== ppId) return;
+      setMultiJobError(true);
+      setActiveJob(null);
+      setActiveJobBooking(null);
+      setAcceptedBooking(null);
       return;
     }
 
-    const job = activeJobs[0];
+    // ── No genuine active job: clear any stale activeJob ─────────────
+    if (gen !== acceptGenRef.current || providerProfileIdRef.current !== ppId) return;
+    setActiveJob(null);
+    setActiveJobBooking(null);
 
-    // Fetch the booking details for this job so the UI can display them.
-    const { data: activeBooking, error: bookingQueryError } = await supabase
+    // ── Priority 2: newly accepted booking waiting for On My Way ─────
+    const { data: acceptedBookings, error: acceptedErr } = await supabase
       .from('bookings')
       .select(`
         id, customer_id, customer_note, address, created_at, scheduled_at,
@@ -548,59 +463,98 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         vehicles!bookings_vehicle_id_fkey(brand, model, plate, color),
         services!bookings_service_id_fkey(name, base_price)
       `)
-      .eq('id', job.booking_id)
-      .maybeSingle();
+      .eq('provider_id', ppId)
+      .eq('status', 'accepted')
+      .order('accepted_at', { ascending: false });
 
-    if (bookingQueryError) {
-      console.error('[fetchActiveBooking] booking query failed:', {
-        code: bookingQueryError.code,
-        message: bookingQueryError.message,
+    if (gen !== acceptGenRef.current || providerProfileIdRef.current !== ppId) return;
+
+    if (acceptedErr) {
+      console.error('[fetchActiveBooking] accepted booking query failed:', {
+        code: acceptedErr.code,
+        message: acceptedErr.message,
       });
       return;
     }
 
-    if (!activeBooking) return;
+    if (!acceptedBookings || acceptedBookings.length === 0) {
+      // No active job and no accepted booking. Clear any stale acceptedBooking
+      // only if its job has progressed.
+      if (acceptedBookingRef.current) {
+        const { data: staleJob } = await supabase
+          .from('jobs')
+          .select('id')
+          .eq('booking_id', acceptedBookingRef.current.id)
+          .limit(1);
+        if (gen !== acceptGenRef.current || providerProfileIdRef.current !== ppId) return;
+        if (staleJob && staleJob.length > 0) {
+          setAcceptedBooking(null);
+        }
+      }
+      return;
+    }
 
-    if (gen !== acceptGenRef.current) return;
+    // Filter out bookings that already have a job row — those are NOT
+    // newly accepted; their job has progressed.
+    const bookingIds = acceptedBookings.map(b => b.id);
+    const { data: existingJobs, error: jobsLookupError } = await supabase
+      .from('jobs')
+      .select('id, booking_id')
+      .in('booking_id', bookingIds);
 
-    setAcceptedBooking(activeBooking as BookingRequest);
+    if (gen !== acceptGenRef.current || providerProfileIdRef.current !== ppId) return;
 
-    setActiveJob({
-      id: job.id,
-      status: job.status ?? '',
-      provider_id: job.provider_id ?? '',
-      before_photo_url: job.before_photo_url ?? null,
-      after_photo_url: job.after_photo_url ?? null,
-      provider_closed_at: job.provider_closed_at ?? null,
-    });
-    const st = job.status ?? '';
-    if (['on_the_way', 'arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
-      setOnMyWayDone(true);
+    if (jobsLookupError) {
+      console.error('[fetchActiveBooking] job lookup for accepted bookings failed:', {
+        code: jobsLookupError.code,
+        message: jobsLookupError.message,
+      });
+      return;
     }
-    if (['arrived', 'started', 'pending_approval', 'completed'].includes(st)) {
-      setArrivedDone(true);
-    }
-    if (['started', 'pending_approval', 'completed'].includes(st)) {
-      setStartWashDone(true);
-    }
-    if (['pending_approval', 'completed'].includes(st)) {
-      setSendApprovalDone(true);
-    }
-    if (st === 'completed') {
-      setCustomerApproved(true);
-    }
-    if (job.before_photo_url) {
-      setPhotoPreview(job.before_photo_url);
-      setPhotoUploaded(true);
-    }
-    if (job.after_photo_url) {
-      setAfterPhotoPreview(job.after_photo_url);
-      setAfterPhotoUploaded(true);
+
+    const bookingIdsWithJobs = new Set((existingJobs ?? []).map(j => j.booking_id));
+    const validBooking = acceptedBookings.find(b => !bookingIdsWithJobs.has(b.id)) ?? null;
+
+    if (validBooking) {
+      setAcceptedBooking(validBooking as BookingRequest);
+      // Reset workflow flags for a clean accepted booking.
+      setOnMyWayDone(false);
+      setArrivedDone(false);
+      setStartWashDone(false);
+      setSendApprovalDone(false);
+      setCustomerApproved(false);
+    } else if (
+      acceptedBookingRef.current &&
+      bookingIdsWithJobs.has(acceptedBookingRef.current.id)
+    ) {
+      // The currently displayed acceptedBooking has progressed to a job — clear it.
+      setAcceptedBooking(null);
     }
   }, []);
 
   useEffect(() => {
     (async () => {
+      // Provider account switch: clear all previous provider state so
+      // Emre and Vahit never share dashboard state.
+      acceptGenRef.current++;
+      setAcceptedBooking(null);
+      setActiveJob(null);
+      setActiveJobBooking(null);
+      setRequests([]);
+      setOnMyWayDone(false);
+      setArrivedDone(false);
+      setStartWashDone(false);
+      setSendApprovalDone(false);
+      setCustomerApproved(false);
+      setPhotoFile(null);
+      setPhotoPreview(null);
+      setPhotoUploaded(false);
+      setPhotoError(null);
+      setAfterPhotoFile(null);
+      setAfterPhotoPreview(null);
+      setAfterPhotoUploaded(false);
+      setAfterPhotoError(null);
+
       const ppId = await fetchData();
       if (ppId) await fetchActiveBooking(ppId);
       setLoadingData(false);
@@ -892,6 +846,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     // Reset all workflow state from any previous job so old flags don't
     // leak into the newly accepted booking.
     setActiveJob(null);
+    setActiveJobBooking(null);
     setOnMyWayDone(false);
     setArrivedDone(false);
     setStartWashDone(false);
@@ -924,8 +879,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   };
 
   const handleViewLocation = () => {
-    if (!acceptedBooking) return;
-    const { latitude, longitude, address } = acceptedBooking;
+    if (!displayBooking) return;
+    const { latitude, longitude, address } = displayBooking;
     if (latitude != null && longitude != null) {
       const url = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
       Linking.openURL(url).catch(() => showToast(t('provider.errOpenMap'), 'error'));
@@ -938,11 +893,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   };
 
   const handleOnMyWay = async () => {
-    if (!acceptedBooking || onMyWayUpdating || onMyWayDone) return;
+    if (!displayBooking || onMyWayUpdating || onMyWayDone) return;
     setOnMyWayUpdating(true);
     try {
       const { error } = await supabase.functions.invoke('job-progress', {
-        body: { booking_id: acceptedBooking.id, action: 'on_my_way' },
+        body: { booking_id: displayBooking.id, action: 'on_my_way' },
       });
       if (error) {
         const err = error as { code?: string; message?: string; details?: unknown; hint?: unknown };
@@ -958,6 +913,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           showToast(t('provider.errJobAlreadyDone'), 'error');
           setAcceptedBooking(null);
           setActiveJob(null);
+          setActiveJobBooking(null);
         } else if (body?.error) {
           showToast(t('provider.errJobStatusMismatch', { current: currentStatus, expected: body?.expected_status ?? '' }), 'error');
         } else {
@@ -969,7 +925,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       const { data: refreshed, error: refreshError } = await supabase
         .from('bookings')
         .select('*, vehicles(*), profiles(*), services(*)')
-        .eq('id', acceptedBooking.id)
+        .eq('id', displayBooking.id)
         .maybeSingle();
       if (refreshError) {
         console.error('[On My Way] Refresh failed', {
@@ -1008,11 +964,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   };
 
   const handleArrived = async () => {
-    if (!acceptedBooking || arrivedUpdating || arrivedDone || !onMyWayDone) return;
+    if (!displayBooking || arrivedUpdating || arrivedDone || !onMyWayDone) return;
     setArrivedUpdating(true);
     try {
       const { error } = await supabase.functions.invoke('job-progress', {
-        body: { booking_id: acceptedBooking.id, action: 'arrived' },
+        body: { booking_id: displayBooking.id, action: 'arrived' },
       });
       if (error) {
         const err = error as { code?: string; message?: string; details?: unknown; hint?: unknown };
@@ -1028,6 +984,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           showToast(t('provider.errJobAlreadyDone'), 'error');
           setAcceptedBooking(null);
           setActiveJob(null);
+          setActiveJobBooking(null);
         } else if (body?.error) {
           showToast(t('provider.errJobStatusMismatch', { current: currentStatus, expected: body?.expected_status ?? '' }), 'error');
         } else {
@@ -1038,7 +995,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       const { data: refreshed, error: refreshError } = await supabase
         .from('bookings')
         .select('*, vehicles(*), profiles(*), services(*)')
-        .eq('id', acceptedBooking.id)
+        .eq('id', displayBooking.id)
         .maybeSingle();
       if (refreshError) {
         console.error('[Arrived] Refresh failed', {
@@ -1099,7 +1056,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       lastLocationSentRef.current = 0;
     };
 
-    if (!onMyWayDone || arrivedDone || !acceptedBooking || !providerProfileId) {
+    if (!onMyWayDone || arrivedDone || !displayBooking || !providerProfileId) {
       stopWatcher();
       // Clear stored coordinates so no stale location is visible after arrival.
       if (providerProfileId) {
@@ -1122,7 +1079,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       return;
     }
 
-    console.log('[GPS] watchPosition starting', { providerProfileId, acceptedBookingId: acceptedBooking?.id });
+    console.log('[GPS] watchPosition starting', { providerProfileId, displayBookingId: displayBooking?.id });
 
     try {
       locationWatchRef.current = navigator.geolocation.watchPosition(
@@ -1195,19 +1152,19 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     return () => {
       stopWatcher();
     };
-  }, [onMyWayDone, arrivedDone, acceptedBooking, providerProfileId]);
+  }, [onMyWayDone, arrivedDone, displayBooking, providerProfileId]);
 
   // Fetch any existing before_photo_url for the active job so the step
   // stays completed across refreshes. Also captures full job state for
   // Start Wash visibility checks.
   const refreshJobPhoto = useCallback(async () => {
-    if (!acceptedBooking || !profile) return;
+    if (!displayBooking || !profile) return;
     try {
       const { data, error } = await supabase.functions.invoke('job-progress', {
-        body: { booking_id: acceptedBooking.id, action: 'get_state' },
+        body: { booking_id: displayBooking.id, action: 'get_state' },
       });
       if (error) {
-        console.error('[before-photo] get_state failed:', {
+        console.error('[before-photo] get_state failed;', {
           code: (error as { code?: string }).code,
           message: (error as { message?: string }).message,
         });
@@ -1225,6 +1182,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           id: job.id,
           status: job.status ?? '',
           provider_id: job.provider_id ?? '',
+          booking_id: displayBooking.id,
           before_photo_url: job.before_photo_url ?? null,
           after_photo_url: job.after_photo_url ?? null,
           provider_closed_at: null,
@@ -1247,24 +1205,24 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     } catch {
       // non-fatal; UI simply shows the upload step
     }
-  }, [acceptedBooking, profile]);
+  }, [displayBooking, profile]);
 
   useEffect(() => {
-    if (arrivedDone && acceptedBooking) {
+    if (arrivedDone && displayBooking) {
       refreshJobPhoto();
     }
-  }, [arrivedDone, acceptedBooking, refreshJobPhoto]);
+  }, [arrivedDone, displayBooking, refreshJobPhoto]);
 
   // Poll get_state while waiting for customer approval so the partner UI
   // flips to "Customer Approved" automatically once the customer approves.
   // Only polls while sendApprovalDone is true and the customer hasn't
   // approved yet. Stops once customerApproved is set.
   useEffect(() => {
-    if (!acceptedBooking || !sendApprovalDone || customerApproved) return;
+    if (!displayBooking || !sendApprovalDone || customerApproved) return;
     const interval = setInterval(async () => {
       try {
         const { data, error } = await supabase.functions.invoke('job-progress', {
-          body: { booking_id: acceptedBooking.id, action: 'get_state' },
+          body: { booking_id: displayBooking.id, action: 'get_state' },
         });
         if (error || !data) return;
         const job = data as { status?: string } | null;
@@ -1278,18 +1236,18 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       }
     }, 8000);
     return () => clearInterval(interval);
-  }, [acceptedBooking, sendApprovalDone, customerApproved, showToast]);
+  }, [displayBooking, sendApprovalDone, customerApproved, showToast]);
 
   // handleCloseCompletedJob: Washer acknowledges a customer-approved
   // completed job and clears it from the dashboard. Persisted via the
   // job-progress edge function (sets jobs.provider_closed_at). The booking
   // stays "accepted" and the job stays "completed" — no data is deleted.
   const handleCloseCompletedJob = useCallback(async () => {
-    if (!acceptedBooking || closingJob || !customerApproved) return;
+    if (!displayBooking || closingJob || !customerApproved) return;
     setClosingJob(true);
     try {
       const { data, error } = await supabase.functions.invoke('job-progress', {
-        body: { booking_id: acceptedBooking.id, action: 'close_job' },
+        body: { booking_id: displayBooking.id, action: 'close_job' },
       });
       if (error || !data) {
         const err = error as { message?: string } | null;
@@ -1300,6 +1258,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       // Only clear local state after the DB write succeeds.
       setAcceptedBooking(null);
       setActiveJob(null);
+      setActiveJobBooking(null);
       setCustomerApproved(false);
       setSendApprovalDone(false);
       showToast(t('provider.successJobClosed'), 'success');
@@ -1313,7 +1272,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     } finally {
       setClosingJob(false);
     }
-  }, [acceptedBooking, closingJob, customerApproved, showToast]);
+  }, [displayBooking, closingJob, customerApproved, showToast]);
 
   const handlePickPhoto = async () => {
     setPhotoError(null);
@@ -1335,7 +1294,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   };
 
   const handleUploadPhoto = async () => {
-    if (!photoFile || !acceptedBooking || !profile || photoUploading) return;
+    if (!photoFile || !displayBooking || !profile || photoUploading) return;
     setPhotoUploading(true);
     setPhotoError(null);
     try {
@@ -1345,7 +1304,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       let jobId = activeJob?.id;
       if (!jobId) {
         const { data: stateData, error: stateError } = await supabase.functions.invoke('job-progress', {
-          body: { booking_id: acceptedBooking.id, action: 'get_state' },
+          body: { booking_id: displayBooking.id, action: 'get_state' },
         });
         if (stateError || !stateData) {
           const err = stateError as { code?: string; message?: string } | null;
@@ -1382,7 +1341,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       // 3. Save the URL via edge function (re-checks ownership + status).
       const { data: saveData, error: saveError } = await supabase.functions.invoke('job-progress', {
         body: {
-          booking_id: acceptedBooking.id,
+          booking_id: displayBooking.id,
           action: 'save_before_photo',
           photo_url: url,
         },
@@ -1408,7 +1367,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       // 4. Re-fetch the job to confirm before_photo_url is persisted and
       //    update activeJob so Start Wash visibility re-evaluates.
       const { data: confirmed, error: confirmError } = await supabase.functions.invoke('job-progress', {
-        body: { booking_id: acceptedBooking.id, action: 'get_state' },
+        body: { booking_id: displayBooking.id, action: 'get_state' },
       });
       if (confirmError || !confirmed) {
         console.error('[before-photo] confirm re-fetch failed:', confirmError);
@@ -1434,8 +1393,10 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           id: confirmedJob.id,
           status: confirmedJob.status ?? '',
           provider_id: confirmedJob.provider_id ?? '',
+          booking_id: displayBooking.id,
           before_photo_url: confirmedUrl,
           after_photo_url: confirmedJob?.after_photo_url ?? null,
+          provider_closed_at: null,
         });
       }
 
@@ -1480,16 +1441,16 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // booking_date, booking_time, and service duration. Bookings without
   // a date/time always pass (no conflict detectable).
   const visibleRequests = useMemo(() => {
-    if (!acceptedBooking) return requests;
+    if (!displayBooking) return requests;
     // Only apply conflict filtering when the job is in an active (non-terminal)
     // state. A completed job must not block new booking requests from appearing.
     const jobStatus = activeJob?.status ?? 'accepted';
     if (!ACTIVE_STATUSES.includes(jobStatus)) return requests;
     const activeSlots: ActiveBooking[] = [{
-      id: acceptedBooking.id,
-      booking_date: acceptedBooking.booking_date ?? null,
-      booking_time: acceptedBooking.booking_time ?? null,
-      service_name: acceptedBooking.services?.name ?? null,
+      id: displayBooking.id,
+      booking_date: displayBooking.booking_date ?? null,
+      booking_time: displayBooking.booking_time ?? null,
+      service_name: displayBooking.services?.name ?? null,
       status: jobStatus,
     }];
     return requests.filter(req =>
@@ -1502,7 +1463,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         activeSlots,
       )
     );
-  }, [requests, acceptedBooking, activeJob]);
+  }, [requests, displayBooking, activeJob]);
 
   // After Photo visibility: only when the job is started, belongs to this
   // partner, and a before photo already exists.
@@ -1529,11 +1490,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   })();
 
   const handleSendForApproval = async () => {
-    if (!acceptedBooking || sendApprovalUpdating || sendApprovalDone || !canSendForApproval) return;
+    if (!displayBooking || sendApprovalUpdating || sendApprovalDone || !canSendForApproval) return;
     setSendApprovalUpdating(true);
     try {
       const { data, error } = await supabase.functions.invoke('job-progress', {
-        body: { booking_id: acceptedBooking.id, action: 'send_for_approval' },
+        body: { booking_id: displayBooking.id, action: 'send_for_approval' },
       });
       if (error || !data) {
         const err = error as { code?: string; message?: string; details?: unknown; hint?: unknown } | null;
@@ -1590,7 +1551,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   };
 
   const handleUploadAfterPhoto = async () => {
-    if (!afterPhotoFile || !acceptedBooking || !profile || afterPhotoUploading) return;
+    if (!afterPhotoFile || !displayBooking || !profile || afterPhotoUploading) return;
     setAfterPhotoUploading(true);
     setAfterPhotoError(null);
 
@@ -1601,7 +1562,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       let jobId = activeJob?.id;
       if (!jobId) {
         const { data: stateData, error: stateError } = await supabase.functions.invoke('job-progress', {
-          body: { booking_id: acceptedBooking.id, action: 'get_state' },
+          body: { booking_id: displayBooking.id, action: 'get_state' },
         });
         if (stateError || !stateData) {
           const err = stateError as { code?: string; message?: string } | null;
@@ -1639,7 +1600,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       // 3. Save the URL via edge function (re-checks ownership + status).
       const { data: saveData, error: saveError } = await supabase.functions.invoke('job-progress', {
         body: {
-          booking_id: acceptedBooking.id,
+          booking_id: displayBooking.id,
           action: 'save_after_photo',
           photo_url: url,
         },
@@ -1669,7 +1630,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
       // 4. Re-fetch the job to confirm after_photo_url is persisted.
       const { data: confirmed, error: confirmError } = await supabase.functions.invoke('job-progress', {
-        body: { booking_id: acceptedBooking.id, action: 'get_state' },
+        body: { booking_id: displayBooking.id, action: 'get_state' },
       });
       if (confirmError || !confirmed) {
         console.error('[after-photo] confirm re-fetch failed:', confirmError);
@@ -1696,8 +1657,10 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           id: confirmedJob.id,
           status: confirmedJob.status ?? '',
           provider_id: confirmedJob.provider_id ?? '',
+          booking_id: displayBooking.id,
           before_photo_url: confirmedJob.before_photo_url ?? null,
           after_photo_url: confirmedUrl,
+          provider_closed_at: null,
         });
       }
 
@@ -1726,11 +1689,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   };
 
   const handleStartWash = async () => {
-    if (!acceptedBooking || startWashUpdating || startWashDone || !canStartWash) return;
+    if (!displayBooking || startWashUpdating || startWashDone || !canStartWash) return;
     setStartWashUpdating(true);
     try {
       const { data, error } = await supabase.functions.invoke('job-progress', {
-        body: { booking_id: acceptedBooking.id, action: 'start_wash' },
+        body: { booking_id: displayBooking.id, action: 'start_wash' },
       });
       if (error || !data) {
         const err = error as { code?: string; message?: string; details?: unknown; hint?: unknown } | null;
@@ -1805,8 +1768,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     onSignOut();
   };
 
-  const hasCoords = acceptedBooking?.latitude != null && acceptedBooking?.longitude != null;
-  const canViewLocation = hasCoords || !!acceptedBooking?.address;
+  const hasCoords = displayBooking?.latitude != null && displayBooking?.longitude != null;
+  const canViewLocation = hasCoords || !!displayBooking?.address;
 
   if (loadingData) return <Loading fullScreen message={t('provider.loading')} />;
 
@@ -1909,18 +1872,18 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         </View>
 
         {/* Accepted booking confirmation */}
-        {acceptedBooking && (
+        {displayBooking && (
           <View style={styles.acceptedCard}>
             <View style={styles.acceptedHeader}>
               <Text style={styles.acceptedIcon}>✅</Text>
               <Text style={styles.acceptedTitle}>{t('provider.acceptedTitle')}</Text>
             </View>
             <Text style={styles.acceptedSubtitle}>
-              {acceptedBooking.vehicles?.brand ?? ''} {acceptedBooking.vehicles?.model ?? ''}
-              {acceptedBooking.vehicles?.plate ? ` — ${acceptedBooking.vehicles.plate}` : ''}
+              {displayBooking.vehicles?.brand ?? ''} {displayBooking.vehicles?.model ?? ''}
+              {displayBooking.vehicles?.plate ? ` — ${displayBooking.vehicles.plate}` : ''}
             </Text>
             <Text style={styles.acceptedCustomer}>
-              {t('provider.customerPrefix')}{acceptedBooking.profiles?.full_name ?? t('provider.unknown')}
+              {t('provider.customerPrefix')}{displayBooking.profiles?.full_name ?? t('provider.unknown')}
             </Text>
             <TouchableOpacity
               style={[
@@ -1934,11 +1897,16 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
               <Text style={styles.viewLocationBtnText}>
               {hasCoords
                 ? t('provider.viewLocation')
-                : acceptedBooking.address
+                : displayBooking.address
                   ? t('provider.viewAddress')
                   : t('provider.locationUnavailable')}
               </Text>
             </TouchableOpacity>
+            {/* On My Way button: only for a newly accepted booking that has
+                NOT yet progressed to a job row. When a genuine active job
+                exists (restored from DB), the workflow flags already reflect
+                the correct stage — never show On My Way for an arrived or
+                started job. */}
             {!onMyWayDone && !activeJob ? (
               <TouchableOpacity
                 style={[styles.onMyWayBtn, onMyWayUpdating && styles.onMyWayBtnDisabled]}
@@ -2191,7 +2159,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
               </View>
             )}
 
-            {!sendApprovalDone && !customerApproved && (
+            {!sendApprovalDone && !customerApproved && !activeJob && (
               <TouchableOpacity
                 style={styles.dismissBtn}
                 onPress={() => setAcceptedBooking(null)}
