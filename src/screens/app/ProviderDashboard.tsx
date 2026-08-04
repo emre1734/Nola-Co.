@@ -70,6 +70,8 @@ interface BookingRequest {
   profiles?: { full_name: string | null } | null;
   vehicles?: { brand: string | null; model: string | null; plate: string | null; color: string | null } | null;
   services?: { name: string | null; base_price: number | null } | null;
+  offer_id?: string | null;
+  offer_expires_at?: string | null;
 }
 
 function haversineKm(
@@ -102,6 +104,68 @@ async function parseEdgeFnError(error: unknown): Promise<EdgeFnErrorBody | null>
     }
   }
   return null;
+}
+
+function OfferCountdown({
+  expiresAt,
+  onExpire,
+  labelTemplate,
+  expiringLabel,
+}: {
+  expiresAt: string;
+  onExpire: () => void;
+  labelTemplate: string;
+  expiringLabel: string;
+}) {
+  const [secondsLeft, setSecondsLeft] = useState(() => {
+    const diff = Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000);
+    return Math.max(0, diff);
+  });
+
+  useEffect(() => {
+    if (secondsLeft <= 0) {
+      onExpire();
+      return;
+    }
+    const timer = setInterval(() => {
+      const diff = Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000);
+      if (diff <= 0) {
+        setSecondsLeft(0);
+        onExpire();
+      } else {
+        setSecondsLeft(diff);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [expiresAt, onExpire]);
+
+  const isUrgent = secondsLeft <= 10;
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '4px 10px',
+        borderRadius: 8,
+        fontSize: 13,
+        fontWeight: 600,
+        background: isUrgent ? 'rgba(239,68,68,0.12)' : 'rgba(59,130,246,0.10)',
+        color: isUrgent ? '#dc2626' : '#2563eb',
+        marginBottom: 8,
+        alignSelf: 'flex-start',
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 12 16" />
+      </svg>
+      {isUrgent
+        ? `${expiringLabel} · ${labelTemplate.replace('{{seconds}}', String(secondsLeft))}`
+        : labelTemplate.replace('{{seconds}}', String(secondsLeft))}
+    </div>
+  );
 }
 
 export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps) {
@@ -317,6 +381,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     const allRequests = offers.map(o => ({
       ...o.bookings,
       id: o.booking_id,
+      offer_id: o.id,
+      offer_expires_at: o.expires_at,
     }));
 
     setRejectedBookingIds(new Set());
@@ -710,87 +776,44 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     if (!profile) return;
     setAcceptingId(bookingId);
 
-    // Load the authenticated user's provider profile record.
-    // bookings.provider_id references provider_profiles(id), NOT profiles.id.
-    const { data: providerRecord, error: providerError } = await supabase
-      .from('provider_profiles')
-      .select('id')
-      .eq('profile_id', profile.id)
-      .maybeSingle();
+    const reqBooking = requests.find(r => r.id === bookingId);
+    const offerId = reqBooking?.offer_id;
 
-    if (providerError) {
-      console.error('[accept] provider_profiles lookup failed:', {
-        code: providerError.code,
-        message: providerError.message,
-        details: providerError.details,
-        hint: providerError.hint,
-      });
+    if (!offerId) {
+      console.error('[accept] no offer_id found for booking', bookingId);
       setAcceptingId(null);
-      showToast(t('provider.errLoadProfile'), 'error');
-      return;
-    }
-
-    if (!providerRecord) {
-      setAcceptingId(null);
-      showToast(t('provider.errNoProviderProfile'), 'error');
-      setProviderMissing(true);
-      return;
-    }
-
-    const providerProfileId = providerRecord.id;
-
-    // Re-check the booking is still available before accepting
-    const { data: check, error: checkError } = await supabase
-      .from('bookings')
-      .select('id, status, provider_id')
-      .eq('id', bookingId)
-      .maybeSingle();
-
-    if (checkError || !check) {
-      setAcceptingId(null);
-      showToast(t('provider.errBookingGone'), 'error');
+      showToast(t('provider.errAcceptFailed'), 'error');
       fetchRequests();
       return;
     }
 
-    if (check.status !== 'waiting' || check.provider_id != null) {
-      setAcceptingId(null);
-      showToast(t('provider.errAlreadyAccepted'), 'error');
-      fetchRequests();
-      return;
-    }
+    // Single Active Job Rule: check before accepting
+    if (providerProfileId) {
+      const { data: activeJobs, error: activeJobsError } = await supabase
+        .from('jobs')
+        .select('id, status, booking_id')
+        .eq('provider_id', providerProfileId)
+        .in('status', ['on_the_way', 'arrived', 'started', 'pending_approval']);
 
-    // Single Active Job Rule: the database is the source of truth. Before
-    // accepting any new booking, query the jobs table for an existing active
-    // job owned by this provider. If one exists, block acceptance — regardless
-    // of time-slot overlap. One provider may have at most one active job.
-    const { data: activeJobs, error: activeJobsError } = await supabase
-      .from('jobs')
-      .select('id, status, booking_id')
-      .eq('provider_id', providerProfileId)
-      .in('status', ['on_the_way', 'arrived', 'started', 'pending_approval']);
+      if (activeJobsError) {
+        console.error('[accept] active-job check failed:', {
+          code: activeJobsError.code,
+          message: activeJobsError.message,
+        });
+        setAcceptingId(null);
+        showToast(t('provider.errStatusRetry'), 'error');
+        return;
+      }
 
-    if (activeJobsError) {
-      console.error('[accept] active-job check failed:', {
-        code: activeJobsError.code,
-        message: activeJobsError.message,
-      });
-      setAcceptingId(null);
-      showToast(t('provider.errStatusRetry'), 'error');
-      return;
-    }
-
-    if (activeJobs && activeJobs.length > 0) {
-      setAcceptingId(null);
-      showToast(t('provider.errActiveJob'), 'error');
-      return;
+      if (activeJobs && activeJobs.length > 0) {
+        setAcceptingId(null);
+        showToast(t('provider.errActiveJob'), 'error');
+        return;
+      }
     }
 
     // Sprint 13.2: Check for reservation conflicts before accepting.
-    // Query all active bookings assigned to this provider and check if the
-    // requested booking's time slot overlaps with any of them.
-    const reqBooking = requests.find(r => r.id === bookingId);
-    if (reqBooking?.booking_date && reqBooking?.booking_time) {
+    if (reqBooking?.booking_date && reqBooking?.booking_time && providerProfileId) {
       const { data: activeBookings } = await supabase
         .from('bookings')
         .select('id, booking_date, booking_time, status, services!bookings_service_id_fkey(name)')
@@ -815,69 +838,46 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       }
     }
 
-    // Atomic update with status + provider_id guard — only updates if still pending and unassigned
-    const { error: bookingError, count } = await supabase
-      .from('bookings')
-      .update({
-        status: 'accepted',
-        provider_id: providerProfileId,
-        accepted_at: new Date().toISOString(),
-      }, { count: 'exact' })
-      .eq('id', bookingId)
-      .eq('status', 'waiting')
-      .is('provider_id', null);
+    // Call the secure RPC — atomically accepts the offer, marks other
+    // offers as accepted_elsewhere, and updates the booking. RLS
+    // prevents direct client updates to booking_offers status.
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('accept_booking_offer', {
+      p_offer_id: offerId,
+    });
 
-    if (bookingError) {
-      console.error('[accept] bookings update failed:', {
-        code: bookingError.code,
-        message: bookingError.message,
-        details: bookingError.details,
-        hint: bookingError.hint,
-        constraint: bookingError.constraint,
+    if (rpcError) {
+      console.error('[accept] RPC failed:', {
+        code: rpcError.code,
+        message: rpcError.message,
+        details: rpcError.details,
+        hint: rpcError.hint,
       });
       setAcceptingId(null);
       showToast(t('provider.errAcceptFailed'), 'error');
       return;
     }
 
-    // count === 0 means no row matched the guard — another partner got there first
-    if (count === 0) {
+    const result = rpcResult as { success: boolean; booking_id: string | null; error: string | null } | null;
+
+    if (!result || !result.success) {
       setAcceptingId(null);
-      showToast(t('provider.errAlreadyAccepted'), 'error');
+      const errMsg = result?.error ?? 'unknown';
+      if (errMsg === 'booking_unavailable' || errMsg === 'offer_accepted_elsewhere') {
+        showToast(t('provider.errAlreadyAccepted'), 'error');
+      } else if (errMsg === 'offer_expired') {
+        showToast(t('provider.errOfferExpired'), 'error');
+      } else if (errMsg === 'offer_not_found') {
+        showToast(t('provider.errBookingGone'), 'error');
+      } else {
+        showToast(t('provider.errAcceptFailed'), 'error');
+      }
       fetchRequests();
       return;
     }
-
-    // Verify the update actually applied (provider_id matches us)
-    const { data: verify } = await supabase
-      .from('bookings')
-      .select('provider_id')
-      .eq('id', bookingId)
-      .maybeSingle();
-
-    if (verify?.provider_id !== providerProfileId) {
-      setAcceptingId(null);
-      showToast(t('provider.errAlreadyAccepted'), 'error');
-      fetchRequests();
-      return;
-    }
-
-    // Mark the accepting provider's offer as accepted and all other
-    // pending offers for this booking as accepted_elsewhere. Uses the
-    // secure RPC because RLS prevents clients from setting those
-    // statuses directly.
-    await supabase.rpc('mark_booking_offer_accepted', {
-      p_booking_id: bookingId,
-      p_provider_id: providerProfileId,
-    });
 
     const acceptedReq = requests.find(r => r.id === bookingId) ?? null;
     setAcceptingId(null);
-    // Increment generation counter so any in-flight fetchActiveBooking
-    // that started before this acceptance cannot overwrite the new booking.
     acceptGenRef.current++;
-    // Reset all workflow state from any previous job so old flags don't
-    // leak into the newly accepted booking.
     setActiveJob(null);
     setActiveJobBooking(null);
     setOnMyWayDone(false);
@@ -2348,6 +2348,18 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
                             : t('provider.noLocation')}
                       </Text>
                     </View>
+
+                    {/* Offer countdown timer */}
+                    {req.offer_expires_at && (
+                      <OfferCountdown
+                        expiresAt={req.offer_expires_at}
+                        onExpire={() => {
+                          setRequests(prev => prev.filter(r => r.id !== req.id));
+                        }}
+                        labelTemplate={t('provider.offerCountdown')}
+                        expiringLabel={t('provider.offerExpiring')}
+                      />
+                    )}
 
                     {/* Accept button */}
                     <TouchableOpacity
