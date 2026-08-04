@@ -226,6 +226,39 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // back to a newly accepted booking waiting for "On My Way".
   const displayBooking = activeJob ? activeJobBooking : acceptedBooking;
 
+  // ── TEMPORARY DIAGNOSTIC: identify exact card source ──
+  useEffect(() => {
+    if (!displayBooking) {
+      console.log('[DIAG] displayBooking is null — no card rendered');
+      console.log('[DIAG] activeJob?.booking_id =', activeJob?.booking_id ?? null);
+      console.log('[DIAG] acceptedBooking?.id =', acceptedBooking?.id ?? null);
+      console.log('[DIAG] displayBooking?.id =', displayBooking?.id ?? null);
+      return;
+    }
+    const source = activeJob ? 'activeJobBooking' : 'acceptedBooking';
+    console.log('[DIAG] === DISPLAYED CARD ===');
+    console.log('[DIAG] booking.id =', displayBooking.id ?? null);
+    console.log('[DIAG] customer_name =', displayBooking.profiles?.full_name ?? null);
+    console.log('[DIAG] booking_date =', displayBooking.booking_date ?? null);
+    console.log('[DIAG] booking_time =', displayBooking.booking_time ?? null);
+    console.log('[DIAG] provider_id (from booking) =', providerProfileId ?? null);
+    console.log('[DIAG] === SOURCE ===');
+    console.log('[DIAG] source =', source);
+    console.log('[DIAG] activeJob?.booking_id =', activeJob?.booking_id ?? null);
+    console.log('[DIAG] acceptedBooking?.id =', acceptedBooking?.id ?? null);
+    console.log('[DIAG] displayBooking?.id =', displayBooking?.id ?? null);
+    console.log('[DIAG] activeJob =', activeJob ? JSON.stringify({
+      id: activeJob.id,
+      status: activeJob.status,
+      provider_id: activeJob.provider_id,
+      booking_id: activeJob.booking_id,
+    }) : null);
+    console.log('[DIAG] acceptedBookingRef.current?.id =', acceptedBookingRef.current?.id ?? null);
+    console.log('[DIAG] requests count =', requests.length, requests.map(r => r.id));
+    console.log('[DIAG] =========================');
+  }, [displayBooking, activeJob, acceptedBooking, providerProfileId, requests]);
+  // ── END TEMPORARY DIAGNOSTIC ──
+
   // Generation counter: incremented when handleAccept succeeds. A stale
   // fetchActiveBooking that started before a new acceptance will see its
   // captured generation is outdated and must not overwrite acceptedBooking.
