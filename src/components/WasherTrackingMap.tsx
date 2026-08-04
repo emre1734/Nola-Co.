@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useGoogleMaps } from '../hooks/useGoogleMaps';
-import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import { colors, spacing, typography, radii } from '../theme';
 import { useTranslation } from '../i18n/useTranslation';
@@ -17,63 +16,73 @@ interface WasherTrackingMapProps {
   onClose: () => void;
 }
 
-interface WasherLocation {
-  latitude: number | null;
-  longitude: number | null;
-  job_status: string | null;
-  provider_name: string | null;
+interface LiveLocation {
+  lat: number;
+  lng: number;
+  updated_at: string;
 }
-
-const POLL_INTERVAL_MS = 4000;
 
 export function WasherTrackingMap({ bookingId, onClose }: WasherTrackingMapProps) {
   const { t } = useTranslation();
-  const { session } = useAuth();
   const { status, error, attachMap, map, google: g } = useGoogleMaps();
 
-  const [location, setLocation] = useState<WasherLocation | null>(null);
+  const [location, setLocation] = useState<LiveLocation | null>(null);
   const [loading, setLoading] = useState(true);
   const [arrived, setArrived] = useState(false);
   const [locError, setLocError] = useState<string | null>(null);
   const markerRef = useRef<google.maps.Marker | null>(null);
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Initial fetch: get the current live location row for this booking.
   const fetchLocation = useCallback(async () => {
-    if (!session) return;
-    const { data, error: rpcError } = await supabase.rpc('get_assigned_washer_location', {
-      p_booking_id: bookingId,
-    });
-    if (rpcError) {
-      setLocError(t('customerHome.trackingUnavailable'));
-      return;
-    }
-    const result = data as WasherLocation[];
-    if (!result || result.length === 0) {
-      // No row means: not the customer's booking, no assigned washer, or job
-      // status is no longer on_the_way. Treat as arrived/ended.
-      setArrived(true);
-      setLocation(null);
-      return;
-    }
-    const loc = result[0];
-    if (loc.latitude == null || loc.longitude == null) {
-      setLocError(t('customerHome.trackingUnavailable'));
-      return;
-    }
-    setLocError(null);
-    setLocation(loc);
-  }, [session, bookingId, t]);
+    const { data, error: dbError } = await supabase
+      .from('provider_live_locations')
+      .select('lat, lng, updated_at')
+      .eq('booking_id', bookingId)
+      .maybeSingle();
 
-  // Initial fetch + polling for live location updates.
+    if (dbError) {
+      setLocError(t('customerHome.trackingUnavailable'));
+      return;
+    }
+
+    if (!data) {
+      // No row yet — provider hasn't started broadcasting. Will arrive via Realtime.
+      return;
+    }
+
+    setLocation({ lat: data.lat, lng: data.lng, updated_at: data.updated_at });
+  }, [bookingId, t]);
+
+  // Initial fetch + Realtime subscription on provider_live_locations.
   useEffect(() => {
     fetchLocation().finally(() => setLoading(false));
-    pollTimerRef.current = setInterval(fetchLocation, POLL_INTERVAL_MS);
-    return () => {
-      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-    };
-  }, [fetchLocation]);
 
-  // Realtime: listen for job status changes to stop tracking immediately.
+    const channel = supabase
+      .channel(`tracking-${bookingId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'provider_live_locations',
+          filter: `booking_id=eq.${bookingId}`,
+        },
+        (payload) => {
+          const row = payload.new as { lat: number; lng: number; updated_at: string } | null;
+          if (row && row.lat != null && row.lng != null) {
+            setLocation({ lat: row.lat, lng: row.lng, updated_at: row.updated_at });
+            setLocError(null);
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [bookingId, fetchLocation]);
+
+  // Realtime: listen for job status changes to stop tracking when the washer arrives.
   useEffect(() => {
     const channel = supabase
       .channel(`job-status:${bookingId}`)
@@ -90,7 +99,6 @@ export function WasherTrackingMap({ bookingId, onClose }: WasherTrackingMapProps
           if (updated.status !== 'on_the_way') {
             setArrived(true);
             setLocation(null);
-            if (pollTimerRef.current) clearInterval(pollTimerRef.current);
           }
         },
       )
@@ -102,8 +110,8 @@ export function WasherTrackingMap({ bookingId, onClose }: WasherTrackingMapProps
 
   // Update the marker when location changes.
   useEffect(() => {
-    if (!map || !g || !location || location.latitude == null || location.longitude == null) return;
-    const pos = { lat: location.latitude, lng: location.longitude };
+    if (!map || !g || !location) return;
+    const pos = { lat: location.lat, lng: location.lng };
 
     if (!markerRef.current) {
       const svg = `<svg width="40" height="52" viewBox="0 0 40 52" xmlns="http://www.w3.org/2000/svg">
@@ -116,7 +124,7 @@ export function WasherTrackingMap({ bookingId, onClose }: WasherTrackingMapProps
         scaledSize: new g.maps.Size(40, 52),
         anchor: new g.maps.Point(20, 52),
       } as google.maps.Icon;
-      markerRef.current = new g.maps.Marker({ map, position: pos, icon, title: location.provider_name ?? undefined });
+      markerRef.current = new g.maps.Marker({ map, position: pos, icon });
     } else {
       markerRef.current.setPosition(pos);
     }
@@ -210,8 +218,6 @@ export function WasherTrackingMap({ bookingId, onClose }: WasherTrackingMapProps
 
         {status === 'ready' && location && (
           <View style={styles.infoBadge}>
-            <Text style={styles.infoLabel}>{t('customerHome.washerLabel')}</Text>
-            <Text style={styles.infoName}>{location.provider_name ?? t('customerHome.washerFallback')}</Text>
             <View style={styles.liveDot} />
             <Text style={styles.liveText}>{t('customerHome.trackingLive')}</Text>
           </View>
@@ -276,24 +282,15 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: spacing.md,
     left: spacing.md,
-    right: spacing.md,
     backgroundColor: colors.surfaceAlt + 'F2',
     borderRadius: radii.lg,
-    padding: spacing.md,
+    padding: spacing.sm,
     borderWidth: 1,
     borderColor: colors.primary + '40',
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    flexWrap: 'wrap',
   },
-  infoLabel: {
-    ...typography.caption,
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  infoName: { ...typography.body, fontWeight: '700', flex: 1 },
   liveDot: {
     width: 8, height: 8, borderRadius: 4,
     backgroundColor: colors.success,

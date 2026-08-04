@@ -88,13 +88,15 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
     }
     const ab = activeData as ActiveBooking;
     setActiveBooking(ab);
-    // Check if the assigned job is actually on_the_way via the secure RPC.
+    // Check if the assigned job is actually on_the_way by looking for a
+    // live location row (only exists while the provider is broadcasting).
     if (ab.provider_id) {
-      const { data: rpcData } = await supabase.rpc('get_assigned_washer_location', {
-        p_booking_id: ab.id,
-      });
-      const rows = (rpcData ?? []) as Array<{ job_status: string | null }>;
-      setJobOnTheWay(rows.length > 0 && rows[0].job_status === 'on_the_way');
+      const { data: locData } = await supabase
+        .from('provider_live_locations')
+        .select('lat, lng')
+        .eq('booking_id', ab.id)
+        .maybeSingle();
+      setJobOnTheWay(!!locData);
     } else {
       setJobOnTheWay(false);
     }

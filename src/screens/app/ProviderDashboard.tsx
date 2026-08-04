@@ -256,7 +256,6 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // Live GPS broadcast while the washer is "on the way". We use a ref so the
   // effect that starts/stops the broadcast doesn't need to re-create on every
   // render — it only depends on whether we have an active booking.
-  const locationWatchRef = useRef<ReturnType<typeof navigator.geolocation.watchPosition> | null>(null);
   const lastLocationSentRef = useRef(0);
   const lastLatRef = useRef<number | null>(null);
   const lastLngRef = useRef<number | null>(null);
@@ -1066,95 +1065,60 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     }
   };
 
-  // Live GPS broadcast: while the washer is "on the way", watch their GPS
-  // position and write coordinates to provider_profiles so the customer's
-  // tracking map can poll them. Starts when onMyWayDone becomes true, stops
-  // when arrivedDone becomes true or the booking is cleared. Coordinates
-  // are cleared on stop so no stale location remains.
-  // Uses refs for showToast/t to avoid re-running on every render (t is
-  // recreated each render by useTranslation, which would cause an infinite
-  // effect loop).
+  // Live GPS broadcast: while the washer is "on the way", periodically get
+  // their GPS position and upsert it into provider_live_locations so the
+  // customer's tracking map can subscribe via Realtime. Starts when
+  // onMyWayDone becomes true, stops when arrivedDone becomes true or the
+  // booking is cleared.
   useEffect(() => {
-    const stopWatcher = () => {
-      if (locationWatchRef.current != null && navigator.geolocation) {
-        try {
-          navigator.geolocation.clearWatch(locationWatchRef.current);
-        } catch {
-          // clearWatch must never throw
-        }
-      }
-      locationWatchRef.current = null;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let stopped = false;
+
+    const stopBroadcast = () => {
+      stopped = true;
+      if (intervalId != null) clearInterval(intervalId);
+      intervalId = null;
       lastLatRef.current = null;
       lastLngRef.current = null;
       lastLocationSentRef.current = 0;
     };
 
     if (!onMyWayDone || arrivedDone || !displayBooking || !providerProfileId) {
-      stopWatcher();
-      // Clear stored coordinates so no stale location is visible after arrival.
-      if (providerProfileId) {
-        supabase
-          .from('provider_profiles')
-          .update({ current_latitude: null, current_longitude: null })
-          .eq('id', providerProfileId)
-          .then(() => {})
-          .catch(() => {});
-      }
+      stopBroadcast();
       return;
     }
 
-    // Guard against duplicate watchers — only one may exist at a time.
-    if (locationWatchRef.current != null) return;
-
-    // Guard against environments without geolocation support.
-    if (!navigator.geolocation || !navigator.geolocation.watchPosition) {
-      console.log('[GPS] navigator.geolocation or watchPosition not available');
+    if (!navigator.geolocation || !navigator.geolocation.getCurrentPosition) {
+      console.log('[GPS] navigator.geolocation not available');
       return;
     }
 
-    console.log('[GPS] watchPosition starting', { providerProfileId, displayBookingId: displayBooking?.id });
+    const sendLocation = (lat: number, lng: number) => {
+      supabase
+        .from('provider_live_locations')
+        .upsert({
+          booking_id: displayBooking.id,
+          job_id: activeJob?.id ?? null,
+          provider_id: providerProfileId,
+          lat,
+          lng,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'booking_id' })
+        .then(() => { console.log('[GPS] live location upsert success'); })
+        .catch((e) => { console.log('[GPS] live location upsert failed', e); });
+    };
 
-    try {
-      locationWatchRef.current = navigator.geolocation.watchPosition(
+    const poll = () => {
+      if (stopped) return;
+      navigator.geolocation.getCurrentPosition(
         (pos) => {
-          console.log('[GPS] success callback entered');
           const { latitude, longitude } = pos.coords;
-          console.log('[GPS] latitude:', latitude, 'longitude:', longitude);
-
-          // Ignore tiny GPS drift (< 10 meters) to avoid unnecessary writes.
-          // 0.0001 degrees ≈ 11 meters at the equator.
-          if (
-            lastLatRef.current != null &&
-            lastLngRef.current != null &&
-            Math.abs(latitude - lastLatRef.current) < 0.0001 &&
-            Math.abs(longitude - lastLngRef.current) < 0.0001
-          ) {
-            return;
-          }
-
-          // Throttle to max one write per 4 seconds to match the customer's
-          // polling interval and avoid hammering the database.
-          const now = Date.now();
-          if (now - lastLocationSentRef.current < 4000) return;
-
           lastLatRef.current = latitude;
           lastLngRef.current = longitude;
-          lastLocationSentRef.current = now;
-
-          console.log('[GPS] database update starting', { providerProfileId, latitude, longitude });
-          supabase
-            .from('provider_profiles')
-            .update({
-              current_latitude: latitude,
-              current_longitude: longitude,
-            })
-            .eq('id', providerProfileId)
-            .then(() => { console.log('[GPS] database update success'); })
-            .catch((e) => { console.log('[GPS] database update failed', e); });
+          sendLocation(latitude, longitude);
         },
         (err) => {
-          console.log('[GPS] error callback', { code: err.code, message: err.message });
-          // Permission denied (code 1) — surface once via toast, do not crash.
+          console.log('[GPS] error', { code: err.code, message: err.message });
           if (err.code === 1) {
             try {
               showToastRef.current(tRef.current('provider.errGpsDenied'), 'error');
@@ -1162,30 +1126,19 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
               // toast must never throw
             }
           }
-          // Position unavailable or timeout — non-fatal. The browser will
-          // retry automatically when a new position becomes available.
         },
-        { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 },
       );
-      console.log('[GPS] watchPosition registered successfully', { watchId: locationWatchRef.current });
-      if (navigator.permissions) {
-        navigator.permissions.query({ name: 'geolocation' as PermissionName }).then((p) => {
-          console.log('[GPS] permission state:', p.state);
-          if (p.state === 'granted') console.log('[GPS] permission granted');
-        }).catch(() => { console.log('[GPS] permissions.query failed'); });
-      } else {
-        console.log('[GPS] navigator.permissions not available');
-      }
-    } catch (e) {
-      // watchPosition must never throw — if it does, fail silently.
-      console.log('[GPS] watchPosition threw', e);
-      locationWatchRef.current = null;
-    }
+    };
+
+    // Send immediately, then every 8 seconds.
+    poll();
+    intervalId = setInterval(poll, 8000);
 
     return () => {
-      stopWatcher();
+      stopBroadcast();
     };
-  }, [onMyWayDone, arrivedDone, displayBooking, providerProfileId]);
+  }, [onMyWayDone, arrivedDone, displayBooking, providerProfileId, activeJob?.id]);
 
   // Fetch any existing before_photo_url for the active job so the step
   // stays completed across refreshes. Also captures full job state for

@@ -160,10 +160,8 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
   }, [showToast]);
 
   // Check whether the customer has an active booking whose assigned job is
-  // 'on_the_way'. Reuses the same SECURITY DEFINER RPC as CustomerHome
-  // (get_assigned_washer_location) so the booking page and home page share
-  // one source of truth and never query the jobs table directly (which is
-  // RLS-locked for customers).
+  // 'on_the_way'. Queries provider_live_locations (one row per booking,
+  // only exists while the provider is actively broadcasting GPS).
   const fetchTrackingBooking = useCallback(async () => {
     if (!session) return;
     const { data, error } = await supabase
@@ -179,11 +177,12 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
       return;
     }
     for (const b of data) {
-      const { data: rpcData } = await supabase.rpc('get_assigned_washer_location', {
-        p_booking_id: b.id,
-      });
-      const rows = (rpcData ?? []) as Array<{ job_status: string | null }>;
-      if (rows.length > 0 && rows[0].job_status === 'on_the_way') {
+      const { data: locData } = await supabase
+        .from('provider_live_locations')
+        .select('lat, lng')
+        .eq('booking_id', b.id)
+        .maybeSingle();
+      if (locData) {
         setTrackingBookingId(b.id);
         return;
       }
