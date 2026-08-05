@@ -953,33 +953,16 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         }
         return;
       }
-      // Refresh the booking from the server
-      const { data: refreshed, error: refreshError } = await supabase
-        .from('bookings')
-        .select('*, vehicles(*), profiles(*), services(*)')
-        .eq('id', displayBooking.id)
-        .maybeSingle();
-      if (refreshError) {
-        console.error('[On My Way] Refresh failed', {
-          code: refreshError.code,
-          message: refreshError.message,
-          details: refreshError.details,
-          hint: refreshError.hint,
-        });
-      } else if (refreshed) {
-        if (refreshed.status === 'cancelled') {
-          showToast(t('provider.errBookingCancelled'), 'error');
-          setAcceptedBooking(null);
-          return;
-        }
-        if (refreshed.status === 'expired') {
-          showToast(t('provider.errBookingExpired'), 'error');
-          setAcceptedBooking(null);
-          return;
-        }
-        setAcceptedBooking(refreshed as BookingRequest);
+      // Restore full state from the database. fetchActiveBooking atomically
+      // sets activeJob, activeJobBooking, and all workflow flags from the
+      // genuine job row. This ensures displayBooking resolves to
+      // activeJobBooking (not null) so the card stays visible and the
+      // Arrived button renders correctly.
+      if (providerProfileId) {
+        await fetchActiveBooking(providerProfileId);
+      } else {
+        setOnMyWayDone(true);
       }
-      setOnMyWayDone(true);
       showToast(t('provider.successOnMyWay'), 'success');
     } catch (err) {
       const e = err as { code?: string; message?: string; details?: unknown; hint?: unknown };
@@ -1024,32 +1007,16 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         }
         return;
       }
-      const { data: refreshed, error: refreshError } = await supabase
-        .from('bookings')
-        .select('*, vehicles(*), profiles(*), services(*)')
-        .eq('id', displayBooking.id)
-        .maybeSingle();
-      if (refreshError) {
-        console.error('[Arrived] Refresh failed', {
-          code: refreshError.code,
-          message: refreshError.message,
-          details: refreshError.details,
-          hint: refreshError.hint,
-        });
-      } else if (refreshed) {
-        if (refreshed.status === 'cancelled') {
-          showToast(t('provider.errBookingCancelled'), 'error');
-          setAcceptedBooking(null);
-          return;
-        }
-        if (refreshed.status === 'expired') {
-          showToast(t('provider.errBookingExpired'), 'error');
-          setAcceptedBooking(null);
-          return;
-        }
-        setAcceptedBooking(refreshed as BookingRequest);
+      // Restore full state from the database. fetchActiveBooking atomically
+      // sets activeJob, activeJobBooking, and all workflow flags
+      // (onMyWayDone, arrivedDone, etc.) from the genuine job row. This
+      // ensures displayBooking resolves to activeJobBooking (not null)
+      // so the card stays visible and the before-photo workflow renders.
+      if (providerProfileId) {
+        await fetchActiveBooking(providerProfileId);
+      } else {
+        setArrivedDone(true);
       }
-      setArrivedDone(true);
       showToast(t('provider.successArrived'), 'success');
     } catch (err) {
       const e = err as { code?: string; message?: string; details?: unknown; hint?: unknown };
