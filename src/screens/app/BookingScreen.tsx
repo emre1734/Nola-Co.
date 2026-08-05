@@ -160,31 +160,37 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
   }, [showToast]);
 
   // Check whether the customer has an active booking whose assigned job is
-  // 'on_the_way'. Queries provider_live_locations (one row per booking,
-  // only exists while the provider is actively broadcasting GPS).
+  // 'on_the_way'. Uses the secure get_assigned_washer_location RPC as the
+  // single source of truth — it validates ownership, provider assignment,
+  // and job status = 'on_the_way' server-side (SECURITY DEFINER, bypasses
+  // RLS). Returns an empty result set if any condition fails.
   const fetchTrackingBooking = useCallback(async () => {
     if (!session) return;
-    const { data, error } = await supabase
+    // Fetch the customer's own bookings (RLS-readable) that have a provider
+    // assigned. These are candidates for tracking — the RPC does the
+    // authoritative job-status check.
+    const { data: candidates, error } = await supabase
       .from('bookings')
       .select('id')
       .eq('customer_id', session.user.id)
-      .eq('status', 'accepted')
       .not('provider_id', 'is', null)
+      .in('status', ['accepted', 'on_the_way', 'arrived', 'started', 'pending_approval'])
       .order('created_at', { ascending: false })
-      .limit(5);
-    if (error || !data || data.length === 0) {
+      .limit(10);
+    if (error || !candidates || candidates.length === 0) {
       setTrackingBookingId(null);
       return;
     }
-    for (const b of data) {
-      const { data: locData } = await supabase
-        .from('provider_live_locations')
-        .select('lat, lng')
-        .eq('booking_id', b.id)
-        .maybeSingle();
-      if (locData) {
-        setTrackingBookingId(b.id);
-        return;
+    for (const b of candidates) {
+      const { data: rpcData } = await supabase.rpc('get_assigned_washer_location', {
+        p_booking_id: b.id,
+      });
+      if (rpcData && Array.isArray(rpcData) && rpcData.length > 0) {
+        const row = rpcData[0] as { job_status?: string };
+        if (row.job_status === 'on_the_way') {
+          setTrackingBookingId(b.id);
+          return;
+        }
       }
     }
     setTrackingBookingId(null);
