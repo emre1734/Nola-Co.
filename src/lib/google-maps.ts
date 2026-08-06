@@ -125,7 +125,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<ReverseG
     const g = await loadGoogleMaps();
     const geocoder = new g.maps.Geocoder();
     return await new Promise<ReverseGeocodeResult>((resolve, reject) => {
-      geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+      geocoder.geocode({ location: { lat, lng } }, (results: google.maps.GeocoderResult[] | null, status: string) => {
         if (status !== 'OK' || !results || results.length === 0) {
           reject(new Error('Geocoder failed: ' + status));
           return;

@@ -100,7 +100,7 @@ export async function uploadSupportPhoto(
 
   if (uploadError) {
     console.error('[support-photo] storage upload failed:', {
-      code: uploadError.code,
+      code: (uploadError as { code?: string }).code,
       message: uploadError.message,
       statusCode: (uploadError as { statusCode?: unknown }).statusCode,
       error: String(uploadError),

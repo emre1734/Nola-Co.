@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: spacing.md,
-    backgroundColor: colors.background,
+    backgroundColor: colors.bg,
     zIndex: 10,
   },
   loadingText: { ...typography.body, color: colors.textSecondary },

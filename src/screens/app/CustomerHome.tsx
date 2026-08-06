@@ -80,13 +80,13 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
       return;
     }
     setServices((svcData as ServiceItem[]) ?? []);
-    setBookings((bkData as BookingItem[]) ?? []);
+    setBookings((bkData as unknown as BookingItem[]) ?? []);
     if (activeErr || !activeData) {
       setActiveBooking(null);
       setJobOnTheWay(false);
       return;
     }
-    const ab = activeData as ActiveBooking;
+    const ab = activeData as unknown as ActiveBooking;
     setActiveBooking(ab);
     // Check if the assigned job is actually on_the_way by looking for a
     // live location row (only exists while the provider is broadcasting).

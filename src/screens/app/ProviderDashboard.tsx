@@ -289,39 +289,6 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // back to a newly accepted booking waiting for "On My Way".
   const displayBooking = activeJob ? activeJobBooking : acceptedBooking;
 
-  // ── TEMPORARY DIAGNOSTIC: identify exact card source ──
-  useEffect(() => {
-    if (!displayBooking) {
-      console.log('[DIAG] displayBooking is null — no card rendered');
-      console.log('[DIAG] activeJob?.booking_id =', activeJob?.booking_id ?? null);
-      console.log('[DIAG] acceptedBooking?.id =', acceptedBooking?.id ?? null);
-      console.log('[DIAG] displayBooking?.id =', displayBooking?.id ?? null);
-      return;
-    }
-    const source = activeJob ? 'activeJobBooking' : 'acceptedBooking';
-    console.log('[DIAG] === DISPLAYED CARD ===');
-    console.log('[DIAG] booking.id =', displayBooking.id ?? null);
-    console.log('[DIAG] customer_name =', displayBooking.profiles?.full_name ?? null);
-    console.log('[DIAG] booking_date =', displayBooking.booking_date ?? null);
-    console.log('[DIAG] booking_time =', displayBooking.booking_time ?? null);
-    console.log('[DIAG] provider_id (from booking) =', providerProfileId ?? null);
-    console.log('[DIAG] === SOURCE ===');
-    console.log('[DIAG] source =', source);
-    console.log('[DIAG] activeJob?.booking_id =', activeJob?.booking_id ?? null);
-    console.log('[DIAG] acceptedBooking?.id =', acceptedBooking?.id ?? null);
-    console.log('[DIAG] displayBooking?.id =', displayBooking?.id ?? null);
-    console.log('[DIAG] activeJob =', activeJob ? JSON.stringify({
-      id: activeJob.id,
-      status: activeJob.status,
-      provider_id: activeJob.provider_id,
-      booking_id: activeJob.booking_id,
-    }) : null);
-    console.log('[DIAG] acceptedBookingRef.current?.id =', acceptedBookingRef.current?.id ?? null);
-    console.log('[DIAG] requests count =', requests.length, requests.map(r => r.id));
-    console.log('[DIAG] =========================');
-  }, [displayBooking, activeJob, acceptedBooking, providerProfileId, requests]);
-  // ── END TEMPORARY DIAGNOSTIC ──
-
   // Generation counter: incremented when handleAccept succeeds. A stale
   // fetchActiveBooking that started before a new acceptance will see its
   // captured generation is outdated and must not overwrite acceptedBooking.
@@ -418,7 +385,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       .order('completed_at', { ascending: false })
       .limit(10);
 
-    const allJobs = (jobs as RecentJob[]) ?? [];
+    const allJobs = (jobs as unknown as RecentJob[]) ?? [];
     setRecentJobs(allJobs.slice(0, 5));
 
     const todayTotal = allJobs
@@ -545,7 +512,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         after_photo_url: activeJobData.after_photo_url,
         provider_closed_at: activeJobData.provider_closed_at,
       });
-      setActiveJobBooking(bookingRow as BookingRequest);
+      setActiveJobBooking(bookingRow as unknown as BookingRequest);
       setAcceptedBooking(null);
 
       // Restore workflow flags from the genuine job status.
@@ -579,7 +546,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       : null;
 
     if (validBooking) {
-      setAcceptedBooking(validBooking as BookingRequest);
+      setAcceptedBooking(validBooking as unknown as BookingRequest);
       setOnMyWayDone(false);
       setArrivedDone(false);
       setStartWashDone(false);
@@ -779,11 +746,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         .eq('provider_id', providerProfileId)
         .in('status', ACTIVE_STATUSES);
 
-      const activeSlots = (activeBookings ?? []).map((b: { id: string; booking_date: string | null; booking_time: string | null; status: string; services?: { name: string | null } | null }) => ({
+      const activeSlots = (activeBookings ?? []).map((b: { id: any; booking_date: any; booking_time: any; status: any; services: { name: any }[] }) => ({
         id: b.id,
         booking_date: b.booking_date,
         booking_time: b.booking_time,
-        service_name: b.services?.name ?? null,
+        service_name: b.services?.[0]?.name ?? null,
         status: b.status,
       }));
 
@@ -1016,7 +983,6 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     }
 
     if (!navigator.geolocation || !navigator.geolocation.getCurrentPosition) {
-      console.log('[GPS] navigator.geolocation not available');
       return;
     }
 
@@ -1031,8 +997,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           lng,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'booking_id' })
-        .then(() => { console.log('[GPS] live location upsert success'); })
-        .catch((e) => { console.log('[GPS] live location upsert failed', e); });
+        .then(() => {}, (e: unknown) => { console.error('[GPS] live location upsert failed', e); });
     };
 
     const poll = () => {
@@ -1045,7 +1010,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           sendLocation(latitude, longitude);
         },
         (err) => {
-          console.log('[GPS] error', { code: err.code, message: err.message });
+          console.error('[GPS] error', { code: err.code, message: err.message });
           if (err.code === 1) {
             try {
               showToastRef.current(tRef.current('provider.errGpsDenied'), 'error');
@@ -1236,7 +1201,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         showToast(t('provider.errJobNotFound'), 'error');
         return;
       }
-      console.debug('[before-photo] using jobId:', jobId);
+
 
       // 2. Upload to Storage using {userId}/{jobId}/before-{ts}.{ext}
       const { url, path, error: uploadErr } = await uploadJobPhoto(
@@ -1293,6 +1258,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         status?: string;
         provider_id?: string;
         before_photo_url?: string | null;
+        after_photo_url?: string | null;
       } | null;
       const confirmedUrl = confirmedJob?.before_photo_url ?? null;
       if (!confirmedUrl) {
@@ -1494,7 +1460,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         showToast(t('provider.errJobNotFound'), 'error');
         return;
       }
-      console.debug('[after-photo] using jobId:', jobId);
+
 
       // 2. Upload to Storage using {userId}/{jobId}/after-{ts}.{ext}
       const { url, path, error: uploadErr } = await uploadJobPhoto(
@@ -2028,7 +1994,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
                   activeOpacity={0.85}
                 >
                   {sendApprovalUpdating ? (
-                    <View style={styles.startWashBtnRow}>
+                    <View style={styles.startWashBtn}>
                       <ActivityIndicator color="#fff" size="small" />
                       <Text style={styles.startWashBtnText}>{t('provider.sending')}</Text>
                     </View>
@@ -2519,8 +2485,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       </Modal>
 
       <Modal
-        visible={locationPreview !== undefined}
-        onClose={() => setLocationPreview(undefined)}
+        visible={locationPreview !== null}
+        onClose={() => setLocationPreview(null)}
         title={t('provider.locationPreviewTitle')}
       >
         {locationPreview && Number.isFinite(locationPreview.lat) && Number.isFinite(locationPreview.lng) ? (
@@ -2546,7 +2512,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
             </a>
             <TouchableOpacity
               style={styles.locationPreviewCloseBtn}
-              onPress={() => setLocationPreview(undefined)}
+              onPress={() => setLocationPreview(null)}
               activeOpacity={0.85}
             >
               <Text style={styles.locationPreviewCloseBtnText}>
@@ -2561,7 +2527,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
             </Text>
             <TouchableOpacity
               style={styles.locationPreviewCloseBtn}
-              onPress={() => setLocationPreview(undefined)}
+              onPress={() => setLocationPreview(null)}
               activeOpacity={0.85}
             >
               <Text style={styles.locationPreviewCloseBtnText}>
@@ -3081,7 +3047,7 @@ const styles = StyleSheet.create({
   locationPreviewIframe: {
     width: '100%',
     height: '100%',
-    border: 0,
+    borderWidth: 0,
   },
   locationPreviewUnavailableText: {
     ...typography.body,

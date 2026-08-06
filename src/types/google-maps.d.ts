@@ -3,7 +3,7 @@
  * Only covers the APIs used by WishWash.
  */
 
-export declare namespace google {
+declare namespace google {
   namespace maps {
     class Map {
       constructor(el: HTMLElement, opts: MapOptions);

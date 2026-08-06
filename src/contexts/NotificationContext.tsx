@@ -151,7 +151,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     if (session && permission === 'granted' && profile?.notifications_enabled !== false) {
       registerToken();
       // Sync notification language with current app locale
-      if (profile.notification_language !== locale) {
+      if (profile && profile.notification_language !== locale) {
         updateProfile({ notification_language: locale }).catch(() => {});
       }
     }

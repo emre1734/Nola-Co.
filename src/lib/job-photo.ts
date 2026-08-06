@@ -97,7 +97,7 @@ export async function uploadJobPhoto(
 
   if (uploadError) {
     console.error('[job-photo] storage upload failed:', {
-      code: uploadError.code,
+      code: (uploadError as { code?: string }).code,
       message: uploadError.message,
       statusCode: (uploadError as { statusCode?: unknown }).statusCode,
       error: String(uploadError),

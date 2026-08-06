@@ -98,7 +98,7 @@ export function AcceptanceCheckbox({
         {labelPrefix}{' '}
         <Text
           style={styles.acceptLink}
-          onPress={(e) => {
+          onPress={(e: { stopPropagation?: () => void }) => {
             e.stopPropagation?.();
             onOpen();
           }}

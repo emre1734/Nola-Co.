@@ -115,7 +115,7 @@ export function SettingsScreen({ onBack, onSignOut }: SettingsScreenProps) {
             </View>
             <Switch
               value={notificationsEnabled && permission === 'granted'}
-              onValueChange={async (val) => {
+              onValueChange={async (val: boolean) => {
                 if (val && permission !== 'granted') {
                   await requestPermission();
                 } else {

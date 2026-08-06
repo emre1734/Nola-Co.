@@ -60,9 +60,9 @@ const EXTRA_SERVICES: ExtraService[] = [
 // Extras step is hidden for the MVP release. The implementation is kept
 // intact so Extras can be re-enabled by adding 'Extras' back to STEPS.
 const EXTRAS_ENABLED = false;
-const STEPS = (EXTRAS_ENABLED
+const STEPS: readonly string[] = EXTRAS_ENABLED
   ? ['Vehicle', 'Service', 'Extras', 'Location', 'DateTime', 'Review']
-  : ['Vehicle', 'Service', 'Location', 'DateTime', 'Review']) as const;
+  : ['Vehicle', 'Service', 'Location', 'DateTime', 'Review'];
 
 export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
   const { t } = useTranslation();

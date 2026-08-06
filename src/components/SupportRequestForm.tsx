@@ -559,7 +559,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   photoAddIcon: { color: colors.primary, fontSize: 28, fontWeight: '300', lineHeight: 30 },
-  photoAddText: { color: colors.primary, ...typography.caption, fontWeight: '600' },
+  photoAddText: { ...typography.caption, color: colors.primary, fontWeight: '600' },
 
   actions: {
     flexDirection: 'row',

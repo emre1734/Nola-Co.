@@ -96,7 +96,7 @@ export function BookingHistoryScreen({ onBack }: BookingHistoryScreenProps) {
       console.error('[history] upcoming load failed:', upErr.message);
       setUpcoming([]);
     } else {
-      setUpcoming((upData as UpcomingBooking[]) ?? []);
+      setUpcoming((upData as unknown as UpcomingBooking[]) ?? []);
     }
 
     if (error || !data) {

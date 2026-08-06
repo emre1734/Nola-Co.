@@ -20,10 +20,8 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
 
-    /* React Native Web: alias react-native to react-native-web for TS */
-    "paths": {
-      "react-native": ["./node_modules/react-native-web/src/index"]
-    }
+    /* React Native Web: Vite handles the runtime alias; TS resolves types from @types/react-native */
+    "types": ["react-native", "vite/client"]
   },
   "include": ["src"]
 }
