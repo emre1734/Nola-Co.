@@ -174,7 +174,7 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
       .select('id')
       .eq('customer_id', session.user.id)
       .not('provider_id', 'is', null)
-      .in('status', ['accepted', 'on_the_way', 'arrived', 'started', 'pending_approval'])
+      .eq('status', 'accepted')
       .order('created_at', { ascending: false })
       .limit(10);
     if (error || !candidates || candidates.length === 0) {
