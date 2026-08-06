@@ -229,6 +229,35 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
     fetchTrackingBooking();
   }, [fetchData, fetchTrackingBooking]);
 
+  // Discovery polling: while no tracking booking is active yet, poll the
+  // secure RPC every 4 s so the card appears automatically when the washer
+  // presses "On My Way" — without requiring a manual pull-to-refresh.
+  // Stops as soon as trackingBookingId becomes non-null; the existing
+  // realtime close-listener then takes over. Pauses while the tab is hidden.
+  useEffect(() => {
+    if (!session || trackingBookingId) return;
+
+    fetchTrackingBooking();
+
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchTrackingBooking();
+      }
+    }, 4000);
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchTrackingBooking();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [session, trackingBookingId, fetchTrackingBooking]);
+
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([fetchData(), fetchTrackingBooking()]);
