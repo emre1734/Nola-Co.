@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core';
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { supabase } from '../lib/supabase';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -6,6 +8,25 @@ const RESIZE_MAX_DIM = 1600;
 const RESIZE_QUALITY = 0.82;
 
 export async function pickJobPhoto(): Promise<File | null> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const photo = await Camera.getPhoto({
+        source: CameraSource.Camera,
+        resultType: CameraResultType.DataUrl,
+        quality: 100,
+        saveToGallery: false,
+      });
+      if (!photo.dataUrl) return null;
+      const response = await fetch(photo.dataUrl);
+      const blob = await response.blob();
+      return new File([blob], `camera-${Date.now()}.jpg`, { type: blob.type || 'image/jpeg' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/cancel|dismiss|aborted/i.test(message)) return null;
+      throw error;
+    }
+  }
+
   return new Promise(resolve => {
     const input = document.createElement('input');
     input.type = 'file';
