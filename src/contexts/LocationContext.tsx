@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from './AuthContext';
 import { useTranslation } from '../i18n/useTranslation';
+import { getCurrentPosition } from '../lib/native-gps';
 
 export type LocationStatus =
   | 'idle'
@@ -50,7 +51,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     setStatus('requesting');
     setError(null);
 
-    navigator.geolocation.getCurrentPosition(
+    getCurrentPosition(
       (position) => {
         const coords: Coordinates = {
           latitude: position.coords.latitude,
@@ -61,13 +62,13 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         setError(null);
       },
       (err) => {
-        if (err.code === err.PERMISSION_DENIED) {
+        if (err.code === 1) {
           setStatus('denied');
           setError(t('locationCtx.errDenied'));
-        } else if (err.code === err.POSITION_UNAVAILABLE) {
+        } else if (err.code === 2) {
           setStatus('error');
           setError(t('locationCtx.errUnavailable'));
-        } else if (err.code === err.TIMEOUT) {
+        } else if (err.code === 3) {
           setStatus('error');
           setError(t('locationCtx.errTimeout'));
         } else {

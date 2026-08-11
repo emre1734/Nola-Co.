@@ -24,6 +24,7 @@ import {
   validateJobPhoto,
   uploadJobPhoto,
 } from '../../lib/job-photo';
+import { getCurrentPosition } from '../../lib/native-gps';
 import { useTranslation } from '../../i18n/useTranslation';
 
 interface ProviderDashboardProps {
@@ -982,10 +983,6 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       return;
     }
 
-    if (!navigator.geolocation || !navigator.geolocation.getCurrentPosition) {
-      return;
-    }
-
     const sendLocation = (lat: number, lng: number) => {
       supabase
         .from('provider_live_locations')
@@ -1002,7 +999,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
     const poll = () => {
       if (stopped) return;
-      navigator.geolocation.getCurrentPosition(
+      getCurrentPosition(
         (pos) => {
           const { latitude, longitude } = pos.coords;
           lastLatRef.current = latitude;
