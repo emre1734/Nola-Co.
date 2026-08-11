@@ -20,8 +20,7 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
 
-    /* React Native Web: Vite handles the runtime alias; TS resolves types from @types/react-native */
-    "types": ["react-native", "vite/client"]
+    "types": ["vite/client"]
   },
   "include": ["src"]
 }

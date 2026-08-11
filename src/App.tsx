@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { LocationProvider } from './contexts/LocationContext';
@@ -89,7 +88,7 @@ function AppNavigator() {
   };
 
   return (
-    <View style={styles.shell}>
+    <div style={styles.shell}>
       {screen === 'splash' && (
         <SplashScreen onReady={handleSplashReady} />
       )}
@@ -225,7 +224,7 @@ function AppNavigator() {
           onDismiss={dismissPermissionExplainer}
         />
       )}
-    </View>
+    </div>
   );
 }
 
@@ -243,9 +242,9 @@ export default function App() {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = {
   shell: {
     flex: 1,
     backgroundColor: colors.bg,
   },
-});
+};

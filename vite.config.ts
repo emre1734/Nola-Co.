@@ -6,7 +6,6 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      // Map react-native → react-native-web (absolute path avoids the alias loop)
       'react-native': path.resolve(__dirname, 'node_modules/react-native-web'),
       // Stub out native-only packages that can't work on web
       'react-native-safe-area-context': path.resolve(__dirname, 'src/stubs/safe-area.ts'),
