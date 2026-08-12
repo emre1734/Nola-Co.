@@ -285,6 +285,12 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const providerProfileIdRef = useRef<string | null>(null);
   providerProfileIdRef.current = providerProfileId;
 
+  // Tracks the actual profile ID to detect real account switches vs.
+  // token refreshes that create a new profile object reference with the
+  // same ID. Prevents the [profile] effect from wiping photo state when
+  // returning from the native camera.
+  const profileIdRef = useRef<string | null | undefined>(null);
+
   // The booking to display in the active job card. When a genuine active
   // job exists, use its booking details (activeJobBooking). Otherwise fall
   // back to a newly accepted booking waiting for "On My Way".
@@ -560,6 +566,12 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
   useEffect(() => {
     (async () => {
+      // Guard: only clear and re-fetch if the actual profile ID changed.
+      // Token refreshes (e.g. when the app returns from the native camera)
+      // create a new profile object reference with the same ID — we must
+      // NOT wipe photo state in that case.
+      if (profileIdRef.current === profile?.id) return;
+      profileIdRef.current = profile?.id;
       // Provider account switch: clear all previous provider state so
       // Emre and Vahit never share dashboard state.
       acceptGenRef.current++;
@@ -585,7 +597,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       if (ppId) await fetchActiveBooking(ppId);
       setLoadingData(false);
     })();
-  }, [profile]);
+  }, [profile?.id]);
 
   useEffect(() => {
     if (online) fetchRequests();
@@ -1088,6 +1100,17 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     }
   }, [arrivedDone, displayBooking, refreshJobPhoto]);
 
+  // Development-only: trace photoFile state changes to diagnose the
+  // native camera → state bridge.
+  useEffect(() => {
+    console.log('[before-photo] photoFile state changed', {
+      hasFile: !!photoFile,
+      size: photoFile?.size,
+      name: photoFile?.name,
+      type: photoFile?.type,
+    });
+  }, [photoFile]);
+
   // Poll get_state while waiting for customer approval so the partner UI
   // flips to "Customer Approved" automatically once the customer approves.
   // Only polls while sendApprovalDone is true and the customer hasn't
@@ -1150,26 +1173,36 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   }, [displayBooking, closingJob, customerApproved, showToast]);
 
   const handlePickPhoto = async () => {
+    console.log('[before-photo] pick started');
     setPhotoError(null);
     try {
       const file = await pickJobPhoto();
+      console.log('[before-photo] File received from pickJobPhoto', {
+        size: file?.size,
+        type: file?.type,
+        name: file?.name,
+      });
       if (!file) return;
       const validationError = validateJobPhoto(file);
       if (validationError) {
+        console.error('[before-photo] validation failed:', validationError);
         setPhotoError(validationError);
         showToast(validationError, 'error');
         return;
       }
+      console.log('[before-photo] validation passed, setting photoFile');
       setPhotoFile(file);
       setPhotoPreview(URL.createObjectURL(file));
       setPhotoUploaded(false);
     } catch {
+      console.error('[before-photo] pick error');
       showToast(t('provider.errCamera'), 'error');
     }
   };
 
   const handleUploadPhoto = async () => {
     if (!photoFile || !displayBooking || !profile || photoUploading) return;
+    console.log('[before-photo] upload started', { size: photoFile.size, type: photoFile.type });
     setPhotoUploading(true);
     setPhotoError(null);
     try {
@@ -1212,6 +1245,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         showToast(t('provider.errUploadFailed'), 'error');
         return;
       }
+      console.log('[before-photo] storage upload succeeded', { url });
 
       // 3. Save the URL via edge function (re-checks ownership + status).
       const { data: saveData, error: saveError } = await supabase.functions.invoke('job-progress', {
@@ -1238,6 +1272,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         showToast(msg, 'error');
         return;
       }
+      console.log('[before-photo] before_photo_url saved');
 
       // 4. Re-fetch the job to confirm before_photo_url is persisted and
       //    update activeJob so Start Wash visibility re-evaluates.
@@ -1278,6 +1313,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
       setPhotoUploaded(true);
       setPhotoPreview(confirmedUrl);
+      console.log('[before-photo] workflow advanced', { confirmedUrl });
       showToast(t('provider.successBeforeSaved'), 'success');
     } catch (err) {
       const e = err as { code?: string; message?: string };
