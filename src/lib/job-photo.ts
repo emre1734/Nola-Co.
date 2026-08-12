@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core';
-import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { Camera } from '@capacitor/camera';
 import { supabase } from '../lib/supabase';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
@@ -9,17 +9,21 @@ const RESIZE_QUALITY = 0.82;
 
 export async function pickJobPhoto(): Promise<File | null> {
   if (Capacitor.isNativePlatform()) {
+    console.log('[job-photo] native camera invoked');
     try {
-      const photo = await Camera.getPhoto({
-        source: CameraSource.Camera,
-        resultType: CameraResultType.DataUrl,
+      const result = await Camera.takePhoto({
         quality: 100,
         saveToGallery: false,
       });
-      if (!photo.dataUrl) return null;
-      const response = await fetch(photo.dataUrl);
+      console.log('[job-photo] takePhoto returned', { hasWebPath: !!result.webPath, type: result.type });
+      if (!result.webPath) return null;
+      const response = await fetch(result.webPath);
       const blob = await response.blob();
-      return new File([blob], `camera-${Date.now()}.jpg`, { type: blob.type || 'image/jpeg' });
+      console.log('[job-photo] blob fetched', { size: blob.size, type: blob.type });
+      const mimeType = blob.type && blob.type.startsWith('image/') ? blob.type : 'image/jpeg';
+      const file = new File([blob], `camera-${Date.now()}.jpg`, { type: mimeType });
+      console.log('[job-photo] File created', { size: file.size, type: file.type });
+      return file;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/cancel|dismiss|aborted/i.test(message)) return null;
