@@ -72,7 +72,8 @@ async function ensureNativePermission(
     return true;
   }
 
-  if (status.location === 'prompt' || status.coarseLocation === 'prompt') {
+  if (status.location === 'prompt' || status.location === 'prompt-with-rationale'
+      || status.coarseLocation === 'prompt' || status.coarseLocation === 'prompt-with-rationale') {
     try {
       status = await Geolocation.requestPermissions({
         permissions: ['location', 'coarseLocation'],
