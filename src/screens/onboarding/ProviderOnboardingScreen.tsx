@@ -100,6 +100,7 @@ export function ProviderOnboardingScreen({ onComplete }: ProviderOnboardingScree
       bio: bio.trim(),
       service_radius: radius,
       status: 'offline',
+      is_verified: true,
       working_days: workingDays,
       work_start_time: startTime,
       work_end_time: endTime,
