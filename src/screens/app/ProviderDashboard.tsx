@@ -982,6 +982,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     let stopped = false;
 
     let gpsInFlight = false;
+    let lastGpsErrCode: number | null = null;
+    let upsertToastShown = false;
 
     const stopBroadcast = () => {
       stopped = true;
@@ -1008,7 +1010,17 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           lng,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'booking_id' })
-        .then(() => {}, (e: unknown) => { console.error('[GPS] live location upsert failed', e); });
+        .then(() => { upsertToastShown = false; }, (e: unknown) => {
+          console.error('[GPS] live location upsert failed', e);
+          if (!upsertToastShown) {
+            upsertToastShown = true;
+            try {
+              showToastRef.current('Canlı konum sunucuya gönderilemedi. İnternet bağlantınızı kontrol edin.', 'error');
+            } catch {
+              // toast must never throw
+            }
+          }
+        });
     };
 
     const poll = () => {
@@ -1017,6 +1029,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       getCurrentPosition(
         (pos) => {
           gpsInFlight = false;
+          lastGpsErrCode = null;
           const { latitude, longitude } = pos.coords;
           lastLatRef.current = latitude;
           lastLngRef.current = longitude;
@@ -1031,6 +1044,26 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
             } catch {
               // toast must never throw
             }
+          } else if (err.code === 3) {
+            if (lastGpsErrCode !== 3) {
+              lastGpsErrCode = 3;
+              try {
+                showToastRef.current('GPS konumu zamanında alınamadı. Konum tekrar deneniyor.', 'error');
+              } catch {
+                // toast must never throw
+              }
+            }
+          } else if (err.code === 2) {
+            if (lastGpsErrCode !== 2) {
+              lastGpsErrCode = 2;
+              try {
+                showToastRef.current('GPS konumu şu anda alınamıyor. Konum servisinizin açık olduğundan emin olun.', 'error');
+              } catch {
+                // toast must never throw
+              }
+            }
+          } else {
+            lastGpsErrCode = null;
           }
         },
         { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 },
