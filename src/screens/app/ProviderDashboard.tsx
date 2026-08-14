@@ -981,6 +981,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     let intervalId: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
 
+    let gpsInFlight = false;
+
     const stopBroadcast = () => {
       stopped = true;
       if (intervalId != null) clearInterval(intervalId);
@@ -1010,15 +1012,18 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     };
 
     const poll = () => {
-      if (stopped) return;
+      if (stopped || gpsInFlight) return;
+      gpsInFlight = true;
       getCurrentPosition(
         (pos) => {
+          gpsInFlight = false;
           const { latitude, longitude } = pos.coords;
           lastLatRef.current = latitude;
           lastLngRef.current = longitude;
           sendLocation(latitude, longitude);
         },
         (err) => {
+          gpsInFlight = false;
           console.error('[GPS] error', { code: err.code, message: err.message });
           if (err.code === 1) {
             try {
