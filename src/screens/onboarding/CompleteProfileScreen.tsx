@@ -53,45 +53,67 @@ export function CompleteProfileScreen({ role, onComplete }: CompleteProfileScree
   };
 
   const handleSubmit = async () => {
+    console.log('START_BUTTON_PRESSED');
+    console.log('VALIDATION_STARTED');
     const errs = validate();
     setErrors(errs);
-    if (Object.keys(errs).length) return;
-
-    if (!session) return;
-    setLoading(true);
-
-    let avatarUrl: string | null = null;
-    if (avatarFile) {
-      const { url, error } = await uploadAvatar(session.user.id, avatarFile);
-      if (error) {
-        showToast(t('onboarding.profile.errAvatarUpload') + error, 'error');
-        setLoading(false);
-        return;
-      }
-      avatarUrl = url;
+    if (Object.keys(errs).length) {
+      console.log('VALIDATION_FAILED', errs);
+      return;
     }
+    console.log('VALIDATION_SUCCESS');
 
-    const { error: upsertError } = await supabase.from('profiles').upsert({
-      id: session.user.id,
-      full_name: fullName.trim(),
-      phone: phone.trim(),
-      city: city.trim(),
-      email: session.user.email,
-      role,
-      ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
-      updated_at: new Date().toISOString(),
-    });
-
-    setLoading(false);
-
-    if (upsertError) {
-      showToast(t('onboarding.profile.errSaveProfile') + upsertError.message, 'error');
+    if (!session) {
+      console.log('PROFILE_SAVE_ERROR', 'No session');
+      showToast(t('common.notAuthenticated'), 'error');
       return;
     }
 
-    await refreshProfile();
-    showToast(t('onboarding.profile.successSaved'), 'success');
-    onComplete();
+    console.log('PROFILE_SAVE_STARTED');
+    setLoading(true);
+    try {
+      let avatarUrl: string | null = null;
+      if (avatarFile) {
+        const { url, error } = await uploadAvatar(session.user.id, avatarFile);
+        if (error) {
+          console.log('PROFILE_SAVE_ERROR', 'Avatar: ' + error);
+          showToast(t('onboarding.profile.errAvatarUpload') + error, 'error');
+          return;
+        }
+        avatarUrl = url;
+      }
+
+      const { error: upsertError } = await supabase.from('profiles').upsert({
+        id: session.user.id,
+        full_name: fullName.trim(),
+        phone: phone.trim(),
+        city: city.trim(),
+        email: session.user.email,
+        role,
+        ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
+        updated_at: new Date().toISOString(),
+      });
+
+      if (upsertError) {
+        console.log('PROFILE_SAVE_ERROR', upsertError.message);
+        showToast(t('onboarding.profile.errSaveProfile') + upsertError.message, 'error');
+        return;
+      }
+
+      console.log('PROFILE_SAVE_SUCCESS');
+      await refreshProfile();
+      showToast(t('onboarding.profile.successSaved'), 'success');
+
+      console.log('NAVIGATION_STARTED');
+      onComplete();
+      console.log('NAVIGATION_SUCCESS');
+    } catch (err) {
+      const e = err as { message?: string };
+      console.log('PROFILE_SAVE_ERROR', e?.message ?? 'Unexpected error');
+      showToast(t('onboarding.profile.errSaveProfile') + (e?.message ?? 'Unexpected error'), 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
