@@ -104,16 +104,17 @@ export function RegisterScreen({ onNavigate, onSuccess }: RegisterScreenProps) {
       return;
     }
 
-    const { error } = await signUp(email.trim().toLowerCase(), password);
+    const { error, session } = await signUp(email.trim().toLowerCase(), password);
     if (error) {
       if (error.includes('already registered')) {
         showToast(t('auth.register.errEmailExists'), 'error');
       } else {
         showToast(error, 'error');
       }
+    } else if (session) {
+      onSuccess(email.trim().toLowerCase());
     } else {
       showToast(t('auth.verification.verifyPrompt'), 'success');
-      onSuccess(email.trim().toLowerCase());
     }
   };
 

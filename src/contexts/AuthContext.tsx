@@ -12,7 +12,7 @@ interface AuthState {
 interface AuthContextValue extends AuthState {
   emailVerified: boolean;
   signIn: (email: string, password: string) => Promise<{ error: string | null; emailNotVerified?: boolean }>;
-  signUp: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string) => Promise<{ error: string | null; session: Session | null }>;
   signOut: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<{ error: string | null }>;
   resendVerification: (email: string) => Promise<{ error: string | null }>;
@@ -77,13 +77,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = async (email: string, password: string) => {
     setState(prev => ({ ...prev, loading: true }));
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { emailRedirectTo: window.location.origin },
     });
     setState(prev => ({ ...prev, loading: false }));
-    return { error: error?.message ?? null };
+    return { error: error?.message ?? null, session: data.session };
   };
 
   const signOut = async () => {
