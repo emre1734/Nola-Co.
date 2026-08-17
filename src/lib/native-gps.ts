@@ -146,7 +146,7 @@ export function getCurrentPosition(
 
   ensureNativePermission(onError).then((granted) => {
     if (!granted) return;
-    Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: options.timeout ?? 10000 })
+    Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: options.timeout ?? 10000, maximumAge: options.maximumAge ?? 0 })
       .then((pos) => {
         onSuccess(
           toGpsPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? null, pos.timestamp),

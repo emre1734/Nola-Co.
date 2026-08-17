@@ -1026,6 +1026,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     const poll = () => {
       if (stopped || gpsInFlight) return;
       gpsInFlight = true;
+      console.log('TRACKING_GPS_5S_UPDATE');
       getCurrentPosition(
         (pos) => {
           gpsInFlight = false;
@@ -1033,10 +1034,12 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           const { latitude, longitude } = pos.coords;
           lastLatRef.current = latitude;
           lastLngRef.current = longitude;
+          console.log('TRACKING_LOCATION_PUBLISHED', { latitude, longitude });
           sendLocation(latitude, longitude);
         },
         (err) => {
           gpsInFlight = false;
+          console.log('TRACKING_GPS_ERROR', { code: err.code, message: err.message });
           console.error('[GPS] error', { code: err.code, message: err.message });
           if (err.code === 1) {
             try {
@@ -1066,13 +1069,14 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
             lastGpsErrCode = null;
           }
         },
-        { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 },
       );
     };
 
-    // Send immediately, then every 8 seconds.
+    console.log('TRACKING_EXACT_LOCATION_STARTED', { bookingId: displayBooking.id });
+    // Send immediately, then every 5 seconds.
     poll();
-    intervalId = setInterval(poll, 8000);
+    intervalId = setInterval(poll, 5000);
 
     return () => {
       stopBroadcast();

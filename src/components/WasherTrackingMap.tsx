@@ -70,6 +70,7 @@ export function WasherTrackingMap({ bookingId, onClose }: WasherTrackingMapProps
         (payload) => {
           const row = payload.new as { lat: number; lng: number; updated_at: string } | null;
           if (row && row.lat != null && row.lng != null) {
+            console.log('CUSTOMER_LOCATION_UPDATE_RECEIVED', { lat: row.lat, lng: row.lng, updated_at: row.updated_at });
             setLocation({ lat: row.lat, lng: row.lng, updated_at: row.updated_at });
             setLocError(null);
           }
