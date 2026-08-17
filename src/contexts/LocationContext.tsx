@@ -76,7 +76,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           setError(t('locationCtx.errUnknown'));
         }
       },
-      { enableHighAccuracy: true, timeout: GEOCODE_TIMEOUT_MS, maximumAge: 60000 },
+      { enableHighAccuracy: true, timeout: GEOCODE_TIMEOUT_MS, maximumAge: 0 },
     );
   }, []);
 

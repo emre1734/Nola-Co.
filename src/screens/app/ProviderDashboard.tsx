@@ -25,6 +25,7 @@ import {
   uploadJobPhoto,
 } from '../../lib/job-photo';
 import { getCurrentPosition } from '../../lib/native-gps';
+import { useLocation } from '../../contexts/LocationContext';
 import { useTranslation } from '../../i18n/useTranslation';
 
 interface ProviderDashboardProps {
@@ -173,6 +174,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const { profile, session, signOut } = useAuth();
   const { showToast } = useToast();
   const { t } = useTranslation();
+  const { requestLocation } = useLocation();
   const [stats, setStats] = useState<ProviderStats | null>(null);
   const [newReservation, setNewReservation] = useState<BookingRequest | null>(null);
   const [recentJobs, setRecentJobs] = useState<RecentJob[]>([]);
@@ -598,6 +600,17 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       setLoadingData(false);
     })();
   }, [profile?.id]);
+
+  // Acquire the physical device's current GPS location automatically when
+  // the authenticated provider's dashboard initializes — before any "On My
+  // Way" action. This populates the existing LocationContext state with a
+  // fresh high-accuracy position so the app knows the phone's real location
+  // from startup. Permission is checked/requested inside requestLocation
+  // via the existing native-gps helper.
+  useEffect(() => {
+    if (!profile) return;
+    requestLocation();
+  }, [profile?.id, requestLocation]);
 
   useEffect(() => {
     if (online) fetchRequests();
