@@ -621,9 +621,14 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // another screen (component stays mounted), the app coming to the
   // foreground on mobile, and pull-to-refresh. The database is the
   // source of truth — local state is only a cache.
+  // Also re-acquire a fresh device GPS position so the runtime location
+  // reflects where the phone physically is now, not where it was when the
+  // app was first opened.
   useEffect(() => {
     const resync = () => {
       if (providerProfileId) fetchActiveBooking(providerProfileId);
+      console.log('GPS_REFRESH_ON_RESUME');
+      requestLocation();
     };
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') resync();
@@ -634,7 +639,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       window.removeEventListener('focus', resync);
       document.removeEventListener('visibilitychange', handleVisibility);
     };
-  }, [providerProfileId, fetchActiveBooking]);
+  }, [providerProfileId, fetchActiveBooking, requestLocation]);
 
   // Realtime subscription: listen for booking changes while online.
   // Single source of truth: realtime events trigger a full DB refresh via

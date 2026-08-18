@@ -41,6 +41,11 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const [coordinates, setCoordinates] = useState<Coordinates | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Track whether a fresh runtime GPS position has been acquired this
+  // session. Once true, stale profile/database coordinates must never
+  // overwrite the live device position.
+  const runtimeGpsAcquiredRef = React.useRef(false);
+
   const requestLocation = useCallback(async () => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setStatus('error');
@@ -57,6 +62,8 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         };
+        runtimeGpsAcquiredRef.current = true;
+        console.log('GPS_REFRESH_POSITION_RECEIVED', coords);
         setCoordinates(coords);
         setStatus('granted');
         setError(null);
@@ -110,8 +117,15 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     setError(null);
   }, []);
 
-  // Sync from profile on mount / profile change
+  // Sync from profile on mount / profile change — but only as initial
+  // fallback hydration BEFORE a real runtime GPS position has been
+  // acquired. Once fresh device GPS is obtained, stale profile/database
+  // coordinates must never overwrite it.
   React.useEffect(() => {
+    if (runtimeGpsAcquiredRef.current) {
+      console.log('GPS_PROFILE_FALLBACK_SKIPPED');
+      return;
+    }
     if (profile?.latitude != null && profile?.longitude != null) {
       setCoordinates({ latitude: profile.latitude, longitude: profile.longitude });
       setStatus('granted');
