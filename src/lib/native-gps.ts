@@ -68,12 +68,16 @@ async function ensureNativePermission(
     status = { location: 'prompt', coarseLocation: 'prompt' } as PermissionStatus;
   }
 
-  if (status.location === 'granted' || status.coarseLocation === 'granted') {
+  if (status.location === 'granted') {
     return true;
   }
 
+  // If only coarse/approximate location is granted, or any permission is
+  // still promptable, request both permissions so the user can upgrade to
+  // precise/fine location. Coarse-only is NOT sufficient for live tracking.
   if (status.location === 'prompt' || status.location === 'prompt-with-rationale'
-      || status.coarseLocation === 'prompt' || status.coarseLocation === 'prompt-with-rationale') {
+      || status.coarseLocation === 'prompt' || status.coarseLocation === 'prompt-with-rationale'
+      || status.coarseLocation === 'granted') {
     try {
       status = await Geolocation.requestPermissions({
         permissions: ['location', 'coarseLocation'],
@@ -84,8 +88,13 @@ async function ensureNativePermission(
     }
   }
 
-  if (status.location === 'granted' || status.coarseLocation === 'granted') {
+  if (status.location === 'granted') {
     return true;
+  }
+
+  if (status.coarseLocation === 'granted') {
+    onError({ code: GPS_ERR_PERMISSION_DENIED, message: 'Precise location permission is required for accurate live tracking. Please grant precise location in Settings.' });
+    return false;
   }
 
   onError({ code: GPS_ERR_PERMISSION_DENIED, message: 'Location permission denied' });
