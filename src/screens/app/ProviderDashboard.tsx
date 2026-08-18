@@ -379,7 +379,13 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       return null;
     }
     setProviderMissing(false);
-    setProviderProfileId((providerData as { id: string }).id);
+    const resolvedPpId = (providerData as { id: string }).id;
+    setProviderProfileId(resolvedPpId);
+    // Keep the ref in sync immediately so the stale-guard inside
+    // fetchActiveBooking (which checks providerProfileIdRef.current === ppId)
+    // does not reject the restore when called right after fetchData,
+    // before the state update has flushed to render.
+    providerProfileIdRef.current = resolvedPpId;
 
     setStats(providerData as ProviderStats | null);
     setOnline(providerData?.status === 'available');
@@ -428,6 +434,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   //   - the result is still the latest request
   const fetchActiveBooking = useCallback(async (ppId: string) => {
     const gen = acceptGenRef.current;
+    console.log('ACTIVE_BOOKING_FETCH_STARTED', { ppId, gen });
 
     // ── Priority 1: genuine active job via get_state edge function ──
     // The jobs table is RLS-protected with no client-read policies, so we
@@ -450,6 +457,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     if (gen !== acceptGenRef.current || providerProfileIdRef.current !== ppId) return;
 
     if (acceptedErr) {
+      console.log('ACTIVE_BOOKING_FETCH_ERROR', { code: acceptedErr.code, message: acceptedErr.message });
       console.error('[fetchActiveBooking] accepted booking query failed:', {
         code: acceptedErr.code,
         message: acceptedErr.message,
@@ -507,10 +515,12 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     // Stale guard before applying results.
     if (gen !== acceptGenRef.current || providerProfileIdRef.current !== ppId) return;
 
+    console.log('ACTIVE_BOOKING_FETCH_RESULT', { ppId, acceptedCount: acceptedBookings?.length ?? 0, hasActiveJob: !!activeJobData });
     if (activeJobData && activeBookingId) {
       // Found a genuine active job. Fetch the full booking details.
       const bookingRow = (acceptedBookings ?? []).find(b => b.id === activeBookingId);
       if (!bookingRow) return;
+      console.log('ACTIVE_BOOKING_RESTORED', { bookingId: activeBookingId, jobStatus: activeJobData.status });
 
       setActiveJob({
         id: activeJobData.id,
@@ -555,6 +565,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       : null;
 
     if (validBooking) {
+      console.log('ACTIVE_BOOKING_RESTORED', { bookingId: validBooking.id, jobStatus: 'accepted (no job yet)' });
       setAcceptedBooking(validBooking as unknown as BookingRequest);
       setOnMyWayDone(false);
       setArrivedDone(false);
@@ -562,6 +573,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       setSendApprovalDone(false);
       setCustomerApproved(false);
     } else {
+      console.log('ACTIVE_BOOKING_NOT_FOUND', { ppId });
       setAcceptedBooking(null);
     }
   }, []);
