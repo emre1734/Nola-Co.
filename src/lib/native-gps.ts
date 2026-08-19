@@ -214,7 +214,13 @@ export async function watchPosition(
 
   try {
     const watchId = await Geolocation.watchPosition(
-      { enableHighAccuracy: true, timeout: options.timeout ?? 10000, maximumAge: options.maximumAge ?? 0 },
+      {
+        enableHighAccuracy: true,
+        timeout: options.timeout ?? 15000,
+        maximumAge: options.maximumAge ?? 0,
+        interval: 5000,
+        minimumUpdateInterval: 5000,
+      },
       (pos, err) => {
         if (err) {
           onError({ code: GPS_ERR_POSITION_UNAVAILABLE, message: err.message ?? 'Geolocation error' });
