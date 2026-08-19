@@ -252,6 +252,7 @@ export const tr = {
     trackingWaitingHint: 'Takip, yıkayıcı yola çıktığında kullanılabilir olacak.',
     trackingTitle: 'Washer Yolda',
     trackingLoading: 'Yıkayıcı konumu yükleniyor...',
+    trackingWaiting: 'Yıkayıcı konumu bekleniyor...',
     trackingUnavailable: 'Washer konumu şu anda alınamıyor.',
     trackingEnded: 'Takip sona erdi.',
     trackingClose: 'Kapat',

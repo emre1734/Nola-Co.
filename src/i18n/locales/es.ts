@@ -252,6 +252,7 @@ export const es = {
     trackingWaitingHint: 'El seguimiento estará disponible cuando el lavador esté en camino.',
     trackingTitle: 'El lavador está en camino',
     trackingLoading: 'Cargando ubicación del lavador...',
+    trackingWaiting: 'Esperando ubicación del lavador...',
     trackingUnavailable: 'Actualmente no se puede obtener la ubicación del lavador.',
     trackingEnded: 'El seguimiento ha terminado.',
     trackingClose: 'Cerrar',

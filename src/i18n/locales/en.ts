@@ -252,6 +252,7 @@ export const en = {
     trackingWaitingHint: 'Tracking will be available once your washer is on the way.',
     trackingTitle: 'Washer on the Way',
     trackingLoading: 'Loading washer location...',
+    trackingWaiting: 'Waiting for washer location...',
     trackingUnavailable: 'Washer location is currently unavailable.',
     trackingEnded: 'Tracking has ended.',
     trackingClose: 'Close',
