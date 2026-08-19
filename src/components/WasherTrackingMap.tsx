@@ -26,6 +26,15 @@ export function WasherTrackingMap({ bookingId, onClose }: WasherTrackingMapProps
   const { t } = useTranslation();
   const { status, error, attachMap, map, google: g } = useGoogleMaps();
 
+  // Track location changes for diagnostics.
+  const locationRef = useRef<LiveLocation | null>(null);
+  useEffect(() => {
+    locationRef.current = location;
+    if (location) {
+      console.log('CUSTOMER_TRACKING_STATE_UPDATE', { latitude: location.lat, longitude: location.lng });
+    }
+  }, [location]);
+
   const [location, setLocation] = useState<LiveLocation | null>(null);
   const [loading, setLoading] = useState(true);
   const [arrived, setArrived] = useState(false);
@@ -46,10 +55,11 @@ export function WasherTrackingMap({ bookingId, onClose }: WasherTrackingMapProps
     }
 
     if (!data) {
-      // No row yet — provider hasn't started broadcasting. Will arrive via Realtime.
+      console.log('CUSTOMER_TRACKING_INITIAL_SELECT_EMPTY', { bookingId });
       return;
     }
 
+    console.log('CUSTOMER_TRACKING_INITIAL_SELECT', { bookingId, latitude: data.lat, longitude: data.lng, updatedAt: data.updated_at });
     setLocation({ lat: data.lat, lng: data.lng, updated_at: data.updated_at });
   }, [bookingId, t]);
 
@@ -70,7 +80,7 @@ export function WasherTrackingMap({ bookingId, onClose }: WasherTrackingMapProps
         (payload) => {
           const row = payload.new as { lat: number; lng: number; updated_at: string } | null;
           if (row && row.lat != null && row.lng != null) {
-            console.log('CUSTOMER_LOCATION_UPDATE_RECEIVED', { lat: row.lat, lng: row.lng, updated_at: row.updated_at });
+            console.log('CUSTOMER_TRACKING_REALTIME_PAYLOAD', { bookingId, latitude: row.lat, longitude: row.lng, updatedAt: row.updated_at });
             setLocation({ lat: row.lat, lng: row.lng, updated_at: row.updated_at });
             setLocError(null);
           }
@@ -113,6 +123,7 @@ export function WasherTrackingMap({ bookingId, onClose }: WasherTrackingMapProps
   useEffect(() => {
     if (!map || !g || !location) return;
     const pos = { lat: location.lat, lng: location.lng };
+    console.log('CUSTOMER_TRACKING_MARKER_RENDER', { latitude: pos.lat, longitude: pos.lng });
 
     if (!markerRef.current) {
       const svg = `<svg width="40" height="52" viewBox="0 0 40 52" xmlns="http://www.w3.org/2000/svg">
