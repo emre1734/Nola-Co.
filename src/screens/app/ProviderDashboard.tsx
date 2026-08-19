@@ -24,7 +24,7 @@ import {
   validateJobPhoto,
   uploadJobPhoto,
 } from '../../lib/job-photo';
-import { getCurrentPosition } from '../../lib/native-gps';
+import { watchPosition, clearWatch } from '../../lib/native-gps';
 import { useLocation } from '../../contexts/LocationContext';
 import { useTranslation } from '../../i18n/useTranslation';
 
@@ -1002,23 +1002,34 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     }
   };
 
-  // Live GPS broadcast: while the washer is "on the way", periodically get
-  // their GPS position and upsert it into provider_live_locations so the
-  // customer's tracking map can subscribe via Realtime. Starts when
-  // onMyWayDone becomes true, stops when arrivedDone becomes true or the
-  // booking is cleared.
+  // Live GPS broadcast: while the washer is "on the way", a native GPS
+  // watcher provides continuous precise position updates. The newest valid
+  // position is published to provider_live_locations approximately every 5
+  // seconds so the customer's tracking map can follow the provider's movement.
+  // Starts when onMyWayDone becomes true, stops when arrivedDone becomes true
+  // or the booking is cleared.
   useEffect(() => {
     let intervalId: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
-
-    let gpsInFlight = false;
-    let lastGpsErrCode: number | null = null;
+    let watchId: string | number | null = null;
     let upsertToastShown = false;
+    let lastGpsErrCode: number | null = null;
+
+    // Latest valid position from the watcher — only updated when accuracy
+    // is acceptable (<= 100 m). The 5-second interval publishes this if it
+    // is newer than the last published position.
+    let latestValid: { lat: number; lng: number; ts: number } | null = null;
+    let lastPublishedTs = 0;
 
     const stopBroadcast = () => {
       stopped = true;
       if (intervalId != null) clearInterval(intervalId);
       intervalId = null;
+      if (watchId != null) {
+        console.log('TRACKING_WATCH_STOPPED');
+        clearWatch(watchId);
+        watchId = null;
+      }
       lastLatRef.current = null;
       lastLngRef.current = null;
       lastLocationSentRef.current = 0;
@@ -1053,60 +1064,83 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         });
     };
 
-    const poll = () => {
-      if (stopped || gpsInFlight) return;
-      gpsInFlight = true;
-      console.log('TRACKING_GPS_5S_UPDATE');
-      getCurrentPosition(
-        (pos) => {
-          gpsInFlight = false;
-          lastGpsErrCode = null;
-          const { latitude, longitude } = pos.coords;
-          lastLatRef.current = latitude;
-          lastLngRef.current = longitude;
+    // Start the native GPS watcher — continuous high-accuracy position
+    // updates from the physical device GPS.
+    console.log('TRACKING_WATCH_STARTED', { bookingId: displayBooking.id });
+    watchPosition(
+      (pos) => {
+        if (stopped) return;
+        lastGpsErrCode = null;
+        const { latitude, longitude, accuracy } = pos.coords;
+        const ts = pos.timestamp || Date.now();
+
+        if (accuracy != null && accuracy > 100) {
+          console.log('TRACKING_WATCH_REJECTED_ACCURACY', { latitude, longitude, accuracy });
+          return;
+        }
+
+        console.log('TRACKING_WATCH_POSITION', { latitude, longitude, accuracy });
+        latestValid = { lat: latitude, lng: longitude, ts };
+        lastLatRef.current = latitude;
+        lastLngRef.current = longitude;
+
+        // Publish the first valid position immediately so the customer
+        // sees the provider's real location without waiting 5 seconds.
+        if (lastPublishedTs === 0) {
+          lastPublishedTs = ts;
           console.log('TRACKING_LOCATION_PUBLISHED', { latitude, longitude });
           sendLocation(latitude, longitude);
-        },
-        (err) => {
-          gpsInFlight = false;
-          console.log('TRACKING_GPS_ERROR', { code: err.code, message: err.message });
-          console.error('[GPS] error', { code: err.code, message: err.message });
-          if (err.code === 1) {
+        }
+      },
+      (err) => {
+        console.log('TRACKING_WATCH_ERROR', { code: err.code, message: err.message });
+        console.error('[GPS] watch error', { code: err.code, message: err.message });
+        if (err.code === 1) {
+          try {
+            showToastRef.current(tRef.current('provider.errGpsDenied'), 'error');
+          } catch {
+            // toast must never throw
+          }
+        } else if (err.code === 3) {
+          if (lastGpsErrCode !== 3) {
+            lastGpsErrCode = 3;
             try {
-              showToastRef.current(tRef.current('provider.errGpsDenied'), 'error');
+              showToastRef.current('GPS konumu zamanında alınamadı. Konum tekrar deneniyor.', 'error');
             } catch {
               // toast must never throw
             }
-          } else if (err.code === 3) {
-            if (lastGpsErrCode !== 3) {
-              lastGpsErrCode = 3;
-              try {
-                showToastRef.current('GPS konumu zamanında alınamadı. Konum tekrar deneniyor.', 'error');
-              } catch {
-                // toast must never throw
-              }
-            }
-          } else if (err.code === 2) {
-            if (lastGpsErrCode !== 2) {
-              lastGpsErrCode = 2;
-              try {
-                showToastRef.current('GPS konumu şu anda alınamıyor. Konum servisinizin açık olduğundan emin olun.', 'error');
-              } catch {
-                // toast must never throw
-              }
-            }
-          } else {
-            lastGpsErrCode = null;
           }
-        },
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 },
-      );
-    };
+        } else if (err.code === 2) {
+          if (lastGpsErrCode !== 2) {
+            lastGpsErrCode = 2;
+            try {
+              showToastRef.current('GPS konumu şu anda alınamıyor. Konum servisinizin açık olduğundan emin olun.', 'error');
+            } catch {
+              // toast must never throw
+            }
+          }
+        } else {
+          lastGpsErrCode = null;
+        }
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 },
+    ).then((id) => {
+      if (stopped) {
+        if (id != null) clearWatch(id);
+        return;
+      }
+      watchId = id;
+    });
 
-    console.log('TRACKING_EXACT_LOCATION_STARTED', { bookingId: displayBooking.id });
-    // Send immediately, then every 5 seconds.
-    poll();
-    intervalId = setInterval(poll, 5000);
+    // Publish the latest valid position approximately every 5 seconds.
+    // Only publish if a new valid position has arrived since the last publish.
+    intervalId = setInterval(() => {
+      if (stopped || !latestValid) return;
+      if (latestValid.ts <= lastPublishedTs) return;
+      lastPublishedTs = latestValid.ts;
+      console.log('TRACKING_LOCATION_PUBLISHED', { latitude: latestValid.lat, longitude: latestValid.lng });
+      sendLocation(latestValid.lat, latestValid.lng);
+    }, 5000);
 
     return () => {
       stopBroadcast();
