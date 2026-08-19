@@ -29,7 +29,9 @@ export function LoginScreen({ onNavigate, onSuccess }: LoginScreenProps) {
 
   useEffect(() => {
     if (session && loginSuccessRef.current) {
+      console.log('LOGIN_NAVIGATION_TRIGGERED', { hasSession: !!session, ts: Date.now() });
       loginSuccessRef.current = false;
+      console.log('LOGIN_ONSUCCESS_CALLED', { ts: Date.now() });
       onSuccess();
     }
   }, [session, onSuccess]);
@@ -68,11 +70,17 @@ export function LoginScreen({ onNavigate, onSuccess }: LoginScreenProps) {
   };
 
   const handleLogin = async () => {
+    console.log('LOGIN_SUBMIT_START', { ts: Date.now() });
     const errs = validate(email, password);
     setErrors(errs);
     if (Object.keys(errs).length) return;
 
     const { error, emailNotVerified } = await signIn(email.trim().toLowerCase(), password);
+    console.log('LOGIN_SCREEN_SIGNIN_RESOLVED', {
+      hasError: !!error,
+      hasEmailNotVerified: !!emailNotVerified,
+      ts: Date.now(),
+    });
     if (emailNotVerified) {
       setUnverifiedEmail(email.trim().toLowerCase());
       startResendCooldown();
@@ -84,7 +92,9 @@ export function LoginScreen({ onNavigate, onSuccess }: LoginScreenProps) {
     } else {
       showToast(t('auth.login.successWelcome'), 'success');
       loginSuccessRef.current = true;
+      console.log('LOGIN_SUCCESS_REF_SET', { ts: Date.now() });
     }
+    console.log('LOGIN_SUBMIT_FINALLY', { ts: Date.now() });
   };
 
   if (unverifiedEmail) {

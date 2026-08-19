@@ -32,11 +32,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [emailVerified, setEmailVerified] = useState(false);
 
   const fetchProfile = useCallback(async (userId: string): Promise<Profile | null> => {
+    console.log('LOGIN_PROFILE_FETCH_START', { userId, ts: Date.now() });
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
       .maybeSingle();
+    console.log('LOGIN_PROFILE_FETCH_FINISHED', {
+      profileFound: !!data,
+      errorCode: error?.code ?? null,
+      errorMessage: error?.message ?? null,
+      ts: Date.now(),
+    });
     if (error || !data) return null;
     return data as Profile;
   }, []);
@@ -62,15 +69,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [fetchProfile]);
 
   const signIn = async (email: string, password: string) => {
+    console.log('LOGIN_SIGNIN_CALL_START', { ts: Date.now() });
     setState(prev => ({ ...prev, loading: true }));
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    console.log('LOGIN_SIGNIN_SUPABASE_RETURNED', {
+      hasSession: !!data.session,
+      hasUser: !!data.user,
+      errorCode: error?.code ?? null,
+      errorMessage: error?.message ?? null,
+      ts: Date.now(),
+    });
     setEmailVerified(!!data.user?.email_confirmed_at);
     if (data.session) {
       const profile = await fetchProfile(data.session.user.id);
+      console.log('LOGIN_AUTH_STATE_SET', { hasSession: true, hasProfile: !!profile, ts: Date.now() });
       setState(prev => ({ ...prev, session: data.session, profile, loading: false }));
     } else {
+      console.log('LOGIN_AUTH_STATE_SET', { hasSession: false, ts: Date.now() });
       setState(prev => ({ ...prev, loading: false }));
     }
+    console.log('LOGIN_SIGNIN_FUNCTION_RETURNING', {
+      hasError: !!error,
+      hasSession: !!data.session,
+      ts: Date.now(),
+    });
     return { error: error?.message ?? null };
   };
 
