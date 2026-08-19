@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -20,11 +20,19 @@ interface LoginScreenProps {
 }
 
 export function LoginScreen({ onNavigate, onSuccess }: LoginScreenProps) {
-  const { signIn, resendVerification, loading } = useAuth();
+  const { signIn, resendVerification, loading, session } = useAuth();
   const { showToast } = useToast();
   const { t } = useTranslation();
   const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const loginSuccessRef = useRef(false);
+
+  useEffect(() => {
+    if (session && loginSuccessRef.current) {
+      loginSuccessRef.current = false;
+      onSuccess();
+    }
+  }, [session, onSuccess]);
 
   const validate = (email: string, password: string) => {
     const errors: { email?: string; password?: string } = {};
@@ -75,7 +83,7 @@ export function LoginScreen({ onNavigate, onSuccess }: LoginScreenProps) {
       );
     } else {
       showToast(t('auth.login.successWelcome'), 'success');
-      onSuccess();
+      loginSuccessRef.current = true;
     }
   };
 
