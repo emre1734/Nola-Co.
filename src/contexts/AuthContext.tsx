@@ -86,7 +86,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       errorMessage: error?.message ?? null,
     });
     setEmailVerified(!!data.user?.email_confirmed_at);
-    setState(prev => ({ ...prev, loading: false }));
+    if (data.session) {
+      const profile = await fetchProfile(data.session.user.id);
+      setState(prev => ({ ...prev, session: data.session, profile, loading: false }));
+    } else {
+      setState(prev => ({ ...prev, loading: false }));
+    }
     return { error: error?.message ?? null };
   };
 
