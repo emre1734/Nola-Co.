@@ -37,6 +37,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .select('*')
       .eq('id', userId)
       .maybeSingle();
+    console.log('AUTH_PROFILE_LOAD_RESULT', {
+      userId,
+      role: (data as any)?.role ?? null,
+      profileFound: !!data,
+      errorCode: error?.code ?? null,
+      errorMessage: error?.message ?? null,
+    });
     if (error || !data) return null;
     return data as Profile;
   }, []);
@@ -51,6 +58,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log('AUTH_STATE_CHANGED', {
+        event,
+        hasSession: !!session,
+        userId: session?.user?.id ?? null,
+      });
       (async () => {
         const profile = session ? await fetchProfile(session.user.id) : null;
         setEmailVerified(!!session?.user?.email_confirmed_at);
@@ -62,8 +74,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [fetchProfile]);
 
   const signIn = async (email: string, password: string) => {
+    console.log('AUTH_LOGIN_ATTEMPT', { email });
     setState(prev => ({ ...prev, loading: true }));
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    console.log('AUTH_LOGIN_RESULT', {
+      hasUser: !!data.user,
+      hasSession: !!data.session,
+      userId: data.user?.id ?? null,
+      emailConfirmedAt: data.user?.email_confirmed_at ?? null,
+      errorCode: error?.code ?? null,
+      errorMessage: error?.message ?? null,
+    });
     setEmailVerified(!!data.user?.email_confirmed_at);
     setState(prev => ({ ...prev, loading: false }));
     return { error: error?.message ?? null };
