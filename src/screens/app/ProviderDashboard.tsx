@@ -287,6 +287,16 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const providerProfileIdRef = useRef<string | null>(null);
   providerProfileIdRef.current = providerProfileId;
 
+  // Ref mirrors of activeJob / activeJobBooking so fetchActiveBooking can
+  // read the current active state without adding it to its dependency list
+  // (which would change the callback identity and re-trigger the focus
+  // resync effect). Used to preserve a valid active job when a transient
+  // refresh returns empty.
+  const activeJobRef = useRef<typeof activeJob>(null);
+  activeJobRef.current = activeJob;
+  const activeJobBookingRef = useRef<typeof activeJobBooking>(null);
+  activeJobBookingRef.current = activeJobBooking;
+
   // Tracks the actual profile ID to detect real account switches vs.
   // token refreshes that create a new profile object reference with the
   // same ID. Prevents the [profile] effect from wiping photo state when
@@ -462,6 +472,18 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         code: acceptedErr.code,
         message: acceptedErr.message,
       });
+      // Transient fetch/RLS/network error: do NOT destroy a currently
+      // valid active job. Preserve existing state and let the next resync
+      // retry.
+      const existingJob = activeJobRef.current;
+      if (existingJob) {
+        console.log('ACTIVE_BOOKING_PRESERVED_ON_FETCH_ERROR', {
+          existingJobId: existingJob.id,
+          existingBookingId: existingJob.booking_id,
+          existingStatus: existingJob.status,
+          providerProfileId: ppId,
+        });
+      }
       return;
     }
 
@@ -552,7 +574,80 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       return;
     }
 
-    // ── No genuine active job: clear any stale activeJob ─────────────
+    // ── No genuine active job found in this refresh ──────────────────
+    // Before destroying a currently valid activeJob, verify that its
+    // actual database status is no longer active. A transient empty
+    // refresh (network hiccup, RLS timing, get_state 404) must NOT
+    // terminate a genuinely active job and its live tracking.
+    const existingJob = activeJobRef.current;
+    const existingBooking = activeJobBookingRef.current;
+
+    if (existingJob && existingBooking) {
+      // Targeted verification: ask the server for the exact current job
+      // status. get_state uses the service role and bypasses RLS.
+      let verifiedStatus: string | null = null;
+      try {
+        const { data: verifyData, error: verifyErr } = await supabase.functions.invoke('job-progress', {
+          body: { booking_id: existingJob.booking_id, action: 'get_state' },
+        });
+        if (!verifyErr && verifyData) {
+          const vJob = verifyData as { status?: string } | null;
+          verifiedStatus = vJob?.status ?? null;
+        }
+      } catch {
+        // get_state itself failed — cannot prove terminal state.
+      }
+
+      // Stale guard after the async verification.
+      if (gen !== acceptGenRef.current || providerProfileIdRef.current !== ppId) return;
+
+      const ACTIVE_JOB_STATUSES = ['on_the_way', 'arrived', 'started', 'pending_approval'];
+      if (verifiedStatus === null) {
+        // Could not verify — preserve existing active state. Do NOT
+        // clear based on an inconclusive refresh.
+        console.log('ACTIVE_BOOKING_PRESERVED_ON_EMPTY_REFRESH', {
+          existingJobId: existingJob.id,
+          existingBookingId: existingJob.booking_id,
+          existingStatus: existingJob.status,
+          providerProfileId: ppId,
+        });
+        return;
+      }
+
+      if (ACTIVE_JOB_STATUSES.includes(verifiedStatus)) {
+        // The job is still genuinely active — the refresh simply didn't
+        // surface it (e.g. booking status changed transiently, or a
+        // get_state race). Preserve existing state and restore flags.
+        console.log('ACTIVE_BOOKING_PRESERVED_ON_EMPTY_REFRESH', {
+          existingJobId: existingJob.id,
+          existingBookingId: existingJob.booking_id,
+          existingStatus: existingJob.status,
+          verifiedStatus,
+          providerProfileId: ppId,
+        });
+        // Refresh the job status in-place so local state matches the DB
+        // without destroying the activeJob reference identity that the
+        // tracking effect depends on.
+        setActiveJob({ ...existingJob, status: verifiedStatus });
+        // Keep activeJobBooking as-is — it's still the correct booking.
+        const st = verifiedStatus;
+        setOnMyWayDone(['on_the_way', 'arrived', 'started', 'pending_approval'].includes(st));
+        setArrivedDone(['arrived', 'started', 'pending_approval'].includes(st));
+        setStartWashDone(['started', 'pending_approval'].includes(st));
+        setSendApprovalDone(st === 'pending_approval');
+        return;
+      }
+
+      // verifiedStatus is a terminal status (completed/cancelled) —
+      // the job is genuinely no longer active. Fall through to clear.
+      console.log('ACTIVE_BOOKING_CLEARED_TERMINAL', {
+        existingJobId: existingJob.id,
+        existingBookingId: existingJob.booking_id,
+        verifiedStatus,
+        providerProfileId: ppId,
+      });
+    }
+
     setActiveJob(null);
     setActiveJobBooking(null);
 
