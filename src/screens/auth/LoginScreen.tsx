@@ -25,16 +25,16 @@ export function LoginScreen({ onNavigate, onSuccess }: LoginScreenProps) {
   const { t } = useTranslation();
   const [unverifiedEmail, setUnverifiedEmail] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
-  const loginSuccessRef = useRef(false);
+  const [loginSucceeded, setLoginSucceeded] = useState(false);
+  const navigationTriggeredRef = useRef(false);
 
   useEffect(() => {
-    if (session && loginSuccessRef.current) {
-      console.log('LOGIN_NAVIGATION_TRIGGERED', { hasSession: !!session, ts: Date.now() });
-      loginSuccessRef.current = false;
-      console.log('LOGIN_ONSUCCESS_CALLED', { ts: Date.now() });
-      onSuccess();
-    }
-  }, [session, onSuccess]);
+    if (!session || !loginSucceeded) return;
+    if (navigationTriggeredRef.current) return;
+    navigationTriggeredRef.current = true;
+    setLoginSucceeded(false);
+    onSuccess();
+  }, [session, loginSucceeded, onSuccess]);
 
   const validate = (email: string, password: string) => {
     const errors: { email?: string; password?: string } = {};
@@ -70,17 +70,14 @@ export function LoginScreen({ onNavigate, onSuccess }: LoginScreenProps) {
   };
 
   const handleLogin = async () => {
-    console.log('LOGIN_SUBMIT_START', { ts: Date.now() });
     const errs = validate(email, password);
     setErrors(errs);
     if (Object.keys(errs).length) return;
 
+    setLoginSucceeded(false);
+    navigationTriggeredRef.current = false;
+
     const { error, emailNotVerified } = await signIn(email.trim().toLowerCase(), password);
-    console.log('LOGIN_SCREEN_SIGNIN_RESOLVED', {
-      hasError: !!error,
-      hasEmailNotVerified: !!emailNotVerified,
-      ts: Date.now(),
-    });
     if (emailNotVerified) {
       setUnverifiedEmail(email.trim().toLowerCase());
       startResendCooldown();
@@ -91,10 +88,8 @@ export function LoginScreen({ onNavigate, onSuccess }: LoginScreenProps) {
       );
     } else {
       showToast(t('auth.login.successWelcome'), 'success');
-      loginSuccessRef.current = true;
-      console.log('LOGIN_SUCCESS_REF_SET', { ts: Date.now() });
+      setLoginSucceeded(true);
     }
-    console.log('LOGIN_SUBMIT_FINALLY', { ts: Date.now() });
   };
 
   if (unverifiedEmail) {
