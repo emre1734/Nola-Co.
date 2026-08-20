@@ -1021,12 +1021,12 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     let latestValid: { lat: number; lng: number; ts: number } | null = null;
     let lastPublishedTs = 0;
 
-    const stopBroadcast = () => {
+    const stopBroadcast = (reason?: string) => {
       stopped = true;
       if (intervalId != null) clearInterval(intervalId);
       intervalId = null;
       if (watchId != null) {
-        console.log('TRACKING_WATCH_STOPPED');
+        console.log('TRACKING_WATCH_STOPPED', { bookingId: displayBooking?.id ?? null, reason: reason ?? 'cleanup', ts: Date.now() });
         clearWatch(watchId);
         watchId = null;
       }
@@ -1035,23 +1035,62 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       lastLocationSentRef.current = 0;
     };
 
-    if (!onMyWayDone || arrivedDone || !displayBooking || !providerProfileId) {
+    const shouldTrack = !!(onMyWayDone && !arrivedDone && displayBooking && providerProfileId);
+    console.log('PROVIDER_TRACKING_EFFECT_STATE', {
+      displayBookingId: displayBooking?.id ?? null,
+      providerProfileId: providerProfileId ?? null,
+      onMyWayDone,
+      arrivedDone,
+      jobStatus: activeJob?.status ?? null,
+      jobId: activeJob?.id ?? null,
+      shouldTrack,
+      ts: Date.now(),
+    });
+
+    if (!shouldTrack) {
       stopBroadcast();
       return;
     }
 
     const sendLocation = (lat: number, lng: number) => {
+      const sendBookingId = displayBooking.id;
+      console.log('TRACKING_SEND_LOCATION_ATTEMPT', {
+        bookingId: sendBookingId,
+        providerProfileId,
+        latitude: lat,
+        longitude: lng,
+        ts: Date.now(),
+      });
       supabase
         .from('provider_live_locations')
         .upsert({
-          booking_id: displayBooking.id,
+          booking_id: sendBookingId,
           job_id: activeJob?.id ?? null,
           provider_id: providerProfileId,
           lat,
           lng,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'booking_id' })
-        .then(() => { upsertToastShown = false; }, (e: unknown) => {
+        .then((result: unknown) => {
+          const r = result as { error?: { code?: string; message?: string } | null } | null;
+          const upsertError = r?.error ?? null;
+          console.log('TRACKING_LOCATION_UPSERT_RESULT', {
+            bookingId: sendBookingId,
+            success: !upsertError,
+            errorCode: upsertError?.code ?? null,
+            errorMessage: upsertError?.message ?? null,
+            ts: Date.now(),
+          });
+          if (!upsertError) upsertToastShown = false;
+        }, (e: unknown) => {
+          const err = e as { code?: string; message?: string } | null;
+          console.log('TRACKING_LOCATION_UPSERT_RESULT', {
+            bookingId: sendBookingId,
+            success: false,
+            errorCode: err?.code ?? null,
+            errorMessage: err?.message ?? null,
+            ts: Date.now(),
+          });
           console.error('[GPS] live location upsert failed', e);
           if (!upsertToastShown) {
             upsertToastShown = true;
@@ -1066,7 +1105,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
     // Start the native GPS watcher — continuous high-accuracy position
     // updates from the physical device GPS.
-    console.log('TRACKING_WATCH_STARTED', { bookingId: displayBooking.id });
+    console.log('TRACKING_WATCH_STARTED', { bookingId: displayBooking.id, providerProfileId, timestamp: Date.now() });
     watchPosition(
       (pos) => {
         if (stopped) return;
@@ -1075,11 +1114,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         const ts = pos.timestamp || Date.now();
 
         if (accuracy != null && accuracy > 100) {
-          console.log('TRACKING_WATCH_REJECTED_ACCURACY', { latitude, longitude, accuracy });
+          console.log('TRACKING_WATCH_REJECTED_ACCURACY', { bookingId: displayBooking.id, accuracy, latitude, longitude });
           return;
         }
 
-        console.log('TRACKING_WATCH_POSITION', { latitude, longitude, accuracy });
+        console.log('TRACKING_WATCH_POSITION', { bookingId: displayBooking.id, latitude, longitude, accuracy, timestamp: ts });
         latestValid = { lat: latitude, lng: longitude, ts };
         lastLatRef.current = latitude;
         lastLngRef.current = longitude;
@@ -1088,7 +1127,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         // sees the provider's real location without waiting 5 seconds.
         if (lastPublishedTs === 0) {
           lastPublishedTs = ts;
-          console.log('TRACKING_LOCATION_PUBLISHED', { latitude, longitude });
+          console.log('TRACKING_FIRST_VALID_POSITION', { bookingId: displayBooking.id, latitude, longitude, accuracy });
+          console.log('TRACKING_LOCATION_PUBLISHED', { bookingId: displayBooking.id, latitude, longitude });
           sendLocation(latitude, longitude);
         }
       },
@@ -1138,7 +1178,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       if (stopped || !latestValid) return;
       if (latestValid.ts <= lastPublishedTs) return;
       lastPublishedTs = latestValid.ts;
-      console.log('TRACKING_LOCATION_PUBLISHED', { latitude: latestValid.lat, longitude: latestValid.lng });
+      console.log('TRACKING_LOCATION_PUBLISHED', { bookingId: displayBooking.id, latitude: latestValid.lat, longitude: latestValid.lng });
       sendLocation(latestValid.lat, latestValid.lng);
     }, 5000);
 
