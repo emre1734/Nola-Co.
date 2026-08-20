@@ -34,23 +34,26 @@ export function WasherTrackingMap({ bookingId, onClose }: WasherTrackingMapProps
   const [locError, setLocError] = useState<string | null>(null);
   const markerRef = useRef<google.maps.Marker | null>(null);
 
-  console.log('CUSTOMER_TRACKING_BOOKING_ID', { bookingId });
-
   const fetchLiveLocation = useCallback(async () => {
+    const visibilityState = typeof document !== 'undefined' ? document.visibilityState : 'unknown';
+    console.log('CUSTOMER_TRACKING_FETCH_RUNTIME', { bookingId, visibilityState, ts: Date.now() });
+
     const { data, error: dbError } = await supabase
       .from('provider_live_locations')
       .select('lat, lng, updated_at')
       .eq('booking_id', bookingId)
       .maybeSingle();
 
-    console.log('CUSTOMER_TRACKING_FETCH_RESULT', {
+    console.log('CUSTOMER_TRACKING_FETCH_RUNTIME', {
       bookingId,
-      found: !!data,
+      visibilityState,
+      dataExists: !!data,
       lat: data?.lat ?? null,
       lng: data?.lng ?? null,
       updatedAt: data?.updated_at ?? null,
       errorCode: dbError?.code ?? null,
       errorMessage: dbError?.message ?? null,
+      ts: Date.now(),
     });
 
     if (dbError) {
@@ -98,7 +101,9 @@ export function WasherTrackingMap({ bookingId, onClose }: WasherTrackingMapProps
       .subscribe();
 
     const interval = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
+      const vis = typeof document !== 'undefined' ? document.visibilityState : 'unknown';
+      console.log('CUSTOMER_TRACKING_POLL_TICK', { visibilityState: vis, bookingId, ts: Date.now() });
+      if (vis === 'visible') {
         fetchLiveLocation();
       }
     }, POLL_INTERVAL_MS);
@@ -123,7 +128,19 @@ export function WasherTrackingMap({ bookingId, onClose }: WasherTrackingMapProps
         },
         (payload) => {
           const updated = payload.new as { status: string };
+          console.log('CUSTOMER_TRACKING_JOB_STATUS', {
+            bookingId,
+            jobId: (payload.new as { id?: string })?.id ?? null,
+            status: updated.status,
+            ts: Date.now(),
+          });
           if (updated.status !== 'on_the_way') {
+            console.log('CUSTOMER_TRACKING_LOCATION_CLEARED', {
+              reason: 'job_status_not_on_the_way',
+              bookingId,
+              jobStatus: updated.status,
+              ts: Date.now(),
+            });
             setArrived(true);
             setLocation(null);
           }
