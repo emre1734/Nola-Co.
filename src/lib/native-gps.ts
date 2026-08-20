@@ -212,18 +212,40 @@ export async function watchPosition(
   const granted = await ensureNativePermission(onError);
   if (!granted) return null;
 
+  // Diagnostic: capture the exact permission state immediately before
+  // starting the native watcher.
+  let permState: { location: string; coarseLocation: string } = { location: 'unknown', coarseLocation: 'unknown' };
+  try {
+    const ps = await Geolocation.checkPermissions();
+    permState = { location: ps.location ?? 'unknown', coarseLocation: ps.coarseLocation ?? 'unknown' };
+  } catch {
+    // checkPermissions may throw on older Capacitor versions
+  }
+  console.log('GPS_NATIVE_WATCH_PERMISSION_STATE', JSON.stringify(permState));
+
+  const watchOptions = {
+    enableHighAccuracy: true,
+    timeout: options.timeout ?? 15000,
+    maximumAge: options.maximumAge ?? 0,
+    interval: 5000,
+    minimumUpdateInterval: 5000,
+  };
+  console.log('GPS_NATIVE_WATCH_OPTIONS', JSON.stringify(watchOptions));
+
   try {
     const watchId = await Geolocation.watchPosition(
-      {
-        enableHighAccuracy: true,
-        timeout: options.timeout ?? 15000,
-        maximumAge: options.maximumAge ?? 0,
-        interval: 5000,
-        minimumUpdateInterval: 5000,
-      },
+      watchOptions,
       (pos, err) => {
         if (err) {
-          onError({ code: GPS_ERR_POSITION_UNAVAILABLE, message: err.message ?? 'Geolocation error' });
+          const errObj = err as { code?: string | number; message?: string; name?: string };
+          console.log('GPS_NATIVE_WATCH_ERROR_DETAIL', JSON.stringify({
+            code: errObj?.code ?? null,
+            message: errObj?.message ?? null,
+            name: errObj?.name ?? null,
+            rawString: String(err),
+            jsonString: (() => { try { return JSON.stringify(err); } catch { return null; } })(),
+          }));
+          onError({ code: GPS_ERR_POSITION_UNAVAILABLE, message: errObj?.message ?? 'Geolocation error' });
           return;
         }
         if (pos) {
@@ -235,8 +257,15 @@ export async function watchPosition(
     );
     return watchId;
   } catch (err: unknown) {
-    const e = err as { message?: string };
-    onError({ code: GPS_ERR_POSITION_UNAVAILABLE, message: e?.message ?? 'watchPosition failed' });
+    const errObj = err as { code?: string | number; message?: string; name?: string };
+    console.log('GPS_NATIVE_WATCH_ERROR_DETAIL', JSON.stringify({
+      code: errObj?.code ?? null,
+      message: errObj?.message ?? null,
+      name: errObj?.name ?? null,
+      rawString: String(err),
+      jsonString: (() => { try { return JSON.stringify(err); } catch { return null; } })(),
+    }));
+    onError({ code: GPS_ERR_POSITION_UNAVAILABLE, message: errObj?.message ?? 'watchPosition failed' });
     return null;
   }
 }

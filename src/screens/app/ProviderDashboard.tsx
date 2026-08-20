@@ -1228,6 +1228,13 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         }
       },
       (err) => {
+        console.log('TRACKING_WATCH_ERROR_DETAIL', JSON.stringify({
+          code: err?.code ?? null,
+          message: err?.message ?? null,
+          name: (err as { name?: string } | null)?.name ?? null,
+          rawString: String(err),
+          jsonString: (() => { try { return JSON.stringify(err); } catch { return null; } })(),
+        }));
         console.log('TRACKING_WATCH_ERROR', { code: err.code, message: err.message });
         console.error('[GPS] watch error', { code: err.code, message: err.message });
         if (err.code === 1) {
