@@ -128,38 +128,74 @@ export function getCurrentPosition(
   onError: GpsErrorCallback,
   options: GpsOptions = {},
 ): void {
-  if (!isNativePlatform()) {
+  const native = isNativePlatform();
+  console.log('GPS_GET_CURRENT_SOURCE', JSON.stringify({
+    platform: Capacitor.getPlatform(),
+    isNativePlatform: native,
+    source: native ? 'CAPACITOR_NATIVE' : 'WEB_NAVIGATOR',
+  }));
+
+  if (!native) {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       onError({ code: GPS_ERR_POSITION_UNAVAILABLE, message: 'Geolocation not supported' });
       return;
     }
+    const webOpts = {
+      enableHighAccuracy: options.enableHighAccuracy ?? true,
+      timeout: options.timeout ?? 10000,
+      maximumAge: options.maximumAge ?? 0,
+    };
+    console.log('GPS_NATIVE_GET_CURRENT_OPTIONS', JSON.stringify(webOpts));
     navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        onSuccess(
-          toGpsPosition(
-            pos.coords.latitude,
-            pos.coords.longitude,
-            pos.coords.accuracy ?? null,
-            pos.timestamp,
-          ),
-        ),
-      (err) => onError({ code: err.code, message: err.message }),
-      {
-        enableHighAccuracy: options.enableHighAccuracy ?? true,
-        timeout: options.timeout ?? 10000,
-        maximumAge: options.maximumAge ?? 0,
+      (pos) => {
+        console.log('GPS_NATIVE_RAW_POSITION', JSON.stringify({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy ?? null,
+          timestamp: pos.timestamp,
+          ageMs: Date.now() - pos.timestamp,
+        }));
+        const wrapped = toGpsPosition(
+          pos.coords.latitude,
+          pos.coords.longitude,
+          pos.coords.accuracy ?? null,
+          pos.timestamp,
+        );
+        console.log('GPS_WRAPPER_RETURN_POSITION', JSON.stringify({
+          latitude: wrapped.coords.latitude,
+          longitude: wrapped.coords.longitude,
+          accuracy: wrapped.coords.accuracy,
+          timestamp: wrapped.timestamp,
+        }));
+        onSuccess(wrapped);
       },
+      (err) => onError({ code: err.code, message: err.message }),
+      webOpts,
     );
     return;
   }
 
   ensureNativePermission(onError).then((granted) => {
     if (!granted) return;
-    Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: options.timeout ?? 10000, maximumAge: options.maximumAge ?? 0 })
+    const nativeOpts = { enableHighAccuracy: true, timeout: options.timeout ?? 10000, maximumAge: options.maximumAge ?? 0 };
+    console.log('GPS_NATIVE_GET_CURRENT_OPTIONS', JSON.stringify(nativeOpts));
+    Geolocation.getCurrentPosition(nativeOpts)
       .then((pos) => {
-        onSuccess(
-          toGpsPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? null, pos.timestamp),
-        );
+        console.log('GPS_NATIVE_RAW_POSITION', JSON.stringify({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy ?? null,
+          timestamp: pos.timestamp,
+          ageMs: Date.now() - pos.timestamp,
+        }));
+        const wrapped = toGpsPosition(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? null, pos.timestamp);
+        console.log('GPS_WRAPPER_RETURN_POSITION', JSON.stringify({
+          latitude: wrapped.coords.latitude,
+          longitude: wrapped.coords.longitude,
+          accuracy: wrapped.coords.accuracy,
+          timestamp: wrapped.timestamp,
+        }));
+        onSuccess(wrapped);
       })
       .catch((err: unknown) => {
         const e = err as { code?: string; message?: string };

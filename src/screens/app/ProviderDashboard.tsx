@@ -1156,6 +1156,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         longitude: lng,
         ts: Date.now(),
       });
+      console.log('PROVIDER_CURRENT_LOCATION_RENDER', JSON.stringify({
+        latitude: lat,
+        longitude: lng,
+        source: 'tracking_sendLocation',
+      }));
       supabase
         .from('provider_live_locations')
         .upsert({

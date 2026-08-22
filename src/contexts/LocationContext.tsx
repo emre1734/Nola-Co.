@@ -63,8 +63,18 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           longitude: position.coords.longitude,
         };
         runtimeGpsAcquiredRef.current = true;
-        console.log('GPS_REFRESH_POSITION_RECEIVED', coords);
+        console.log('LOCATION_CONTEXT_GPS_RECEIVED', JSON.stringify({
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          accuracy: position.coords.accuracy,
+          timestamp: position.timestamp,
+        }));
         setCoordinates(coords);
+        console.log('LOCATION_CONTEXT_STATE_SET', JSON.stringify({
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          source: 'runtime_gps',
+        }));
         setStatus('granted');
         setError(null);
       },
@@ -106,6 +116,12 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   );
 
   const setManualLocation = useCallback((coords: Coordinates) => {
+    console.log('LOCATION_CONTEXT_STATE_OVERWRITE_ATTEMPT', JSON.stringify({
+      source: 'manual',
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      runtimeGpsAlreadyAcquired: runtimeGpsAcquiredRef.current,
+    }));
     setCoordinates(coords);
     setStatus('granted');
     setError(null);
@@ -127,7 +143,18 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     if (profile?.latitude != null && profile?.longitude != null) {
+      console.log('LOCATION_CONTEXT_STATE_OVERWRITE_ATTEMPT', JSON.stringify({
+        source: 'profile_fallback',
+        latitude: profile.latitude,
+        longitude: profile.longitude,
+        runtimeGpsAlreadyAcquired: runtimeGpsAcquiredRef.current,
+      }));
       setCoordinates({ latitude: profile.latitude, longitude: profile.longitude });
+      console.log('LOCATION_CONTEXT_STATE_SET', JSON.stringify({
+        latitude: profile.latitude,
+        longitude: profile.longitude,
+        source: 'profile_fallback',
+      }));
       setStatus('granted');
     }
   }, [profile?.latitude, profile?.longitude]);
