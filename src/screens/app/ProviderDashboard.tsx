@@ -24,7 +24,7 @@ import {
   validateJobPhoto,
   uploadJobPhoto,
 } from '../../lib/job-photo';
-import { watchPosition, clearWatch } from '../../lib/native-gps';
+import { watchPosition, clearWatch, getCurrentPosition } from '../../lib/native-gps';
 import { useLocation } from '../../contexts/LocationContext';
 import { useTranslation } from '../../i18n/useTranslation';
 
@@ -1201,6 +1201,44 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     // Start the native GPS watcher — continuous high-accuracy position
     // updates from the physical device GPS.
     console.log('TRACKING_WATCH_STARTED', { bookingId: displayBooking.id, providerProfileId, timestamp: Date.now() });
+
+    // ── Bootstrap: one-shot physical GPS position ──────────────────
+    // Obtain a single fresh high-accuracy position immediately so the
+    // first provider_live_locations row is created without waiting for
+    // the continuous watcher to produce its first usable fix. The watcher
+    // remains responsible for subsequent movement updates.
+    console.log('TRACKING_BOOTSTRAP_STARTED', { bookingId: displayBooking.id, timestamp: Date.now() });
+    getCurrentPosition(
+      (pos) => {
+        if (stopped) return;
+        const { latitude, longitude, accuracy } = pos.coords;
+        if (accuracy != null && accuracy > 100) {
+          console.log('TRACKING_BOOTSTRAP_REJECTED_ACCURACY', { bookingId: displayBooking.id, accuracy, latitude, longitude });
+          return;
+        }
+        console.log('TRACKING_BOOTSTRAP_POSITION', { bookingId: displayBooking.id, latitude, longitude, accuracy });
+        const ts = pos.timestamp || Date.now();
+        latestValid = { lat: latitude, lng: longitude, ts };
+        lastLatRef.current = latitude;
+        lastLngRef.current = longitude;
+        if (lastPublishedTs === 0) {
+          lastPublishedTs = ts;
+          console.log('TRACKING_BOOTSTRAP_PUBLISHED', { bookingId: displayBooking.id, latitude, longitude, accuracy });
+          sendLocation(latitude, longitude);
+        }
+      },
+      (err) => {
+        console.log('TRACKING_BOOTSTRAP_ERROR', {
+          bookingId: displayBooking.id,
+          code: err.code,
+          message: err.message,
+        });
+        // Bootstrap failure is non-fatal — the continuous watcher remains
+        // active and will still attempt to produce positions.
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 },
+    );
+
     watchPosition(
       (pos) => {
         if (stopped) return;
