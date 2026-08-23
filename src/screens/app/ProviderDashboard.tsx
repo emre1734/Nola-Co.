@@ -108,6 +108,21 @@ async function parseEdgeFnError(error: unknown): Promise<EdgeFnErrorBody | null>
   return null;
 }
 
+function logRealtimeEvent(payload: unknown) {
+  const p = payload as { eventType?: string; new?: Record<string, unknown>; old?: Record<string, unknown> };
+  const newRow = (p.new ?? {}) as { id?: string; booking_id?: string; provider_id?: string; status?: string; wave?: number };
+  const oldRow = (p.old ?? {}) as { id?: string; booking_id?: string; provider_id?: string; status?: string; wave?: number };
+  console.log('PROVIDER_OFFERS_REALTIME_EVENT', {
+    eventType: p.eventType ?? 'UNKNOWN',
+    offerId: newRow.id ?? oldRow.id ?? null,
+    bookingId: newRow.booking_id ?? oldRow.booking_id ?? null,
+    providerId: newRow.provider_id ?? oldRow.provider_id ?? null,
+    status: newRow.status ?? oldRow.status ?? null,
+    wave: newRow.wave ?? oldRow.wave ?? null,
+    timestamp: Date.now(),
+  });
+}
+
 function OfferCountdown({
   expiresAt,
   onExpire,
@@ -314,7 +329,20 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const acceptGenRef = useRef(0);
 
   const fetchRequests = useCallback(async () => {
-    if (!profile || !providerProfileId) return;
+    if (!profile || !providerProfileId) {
+      console.log('PROVIDER_OFFERS_FETCH_SKIPPED', {
+        providerProfileId: providerProfileId ?? null,
+        online,
+        reason: !profile ? 'no_profile' : 'no_provider_profile_id',
+        timestamp: Date.now(),
+      });
+      return;
+    }
+    console.log('PROVIDER_OFFERS_FETCH_STARTED', {
+      providerProfileId,
+      online,
+      timestamp: Date.now(),
+    });
     const seq = ++fetchSeqRef.current;
     setRequestsError(null);
     setRequestsLoading(true);
@@ -328,6 +356,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         booking_id,
         status,
         expires_at,
+        wave,
         bookings!booking_offers_booking_id_fkey(
           id, customer_id, customer_note, address, created_at, scheduled_at,
           estimated_price, latitude, longitude, booking_date, booking_time, extra_services,
@@ -342,6 +371,28 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       .order('offered_at', { ascending: false })
       .limit(20);
     setRequestsLoading(false);
+    console.log('PROVIDER_OFFERS_FETCH_RESULT', {
+      providerProfileId,
+      resultCount: data?.length ?? 0,
+      errorCode: error?.code ?? null,
+      errorMessage: error?.message ?? null,
+      offerSummaries: ((data ?? []) as Array<{
+        id?: string;
+        booking_id?: string;
+        provider_id?: string;
+        status?: string;
+        wave?: number;
+        expires_at?: string;
+      }>).map(offer => ({
+        offerId: offer.id ?? null,
+        bookingId: offer.booking_id ?? null,
+        providerId: offer.provider_id ?? null,
+        status: offer.status ?? null,
+        wave: offer.wave ?? null,
+        expiresAt: offer.expires_at ?? null,
+      })),
+      timestamp: Date.now(),
+    });
     if (seq !== fetchSeqRef.current) return;
     if (error) {
       console.error('[fetchRequests] failed:', {
@@ -361,6 +412,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       booking_id: string;
       status: string;
       expires_at: string;
+      wave: number;
       bookings: BookingRequest;
     }>;
     const allRequests = offers.map(o => ({
@@ -370,6 +422,20 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       offer_expires_at: o.expires_at,
     }));
 
+    console.log('PROVIDER_OFFERS_STATE_SET', {
+      providerProfileId,
+      requestCount: allRequests.length,
+      bookingIds: allRequests.map(r => r.id),
+      offerSummaries: offers.map(o => ({
+        offerId: o.id,
+        bookingId: o.booking_id,
+        providerId: providerProfileId,
+        status: o.status,
+        wave: o.wave,
+        expiresAt: o.expires_at,
+      })),
+      timestamp: Date.now(),
+    });
     setRejectedBookingIds(new Set());
     setRequests(allRequests);
   }, [profile, providerProfileId]);
@@ -399,6 +465,12 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
     setStats(providerData as ProviderStats | null);
     setOnline(providerData?.status === 'available');
+    console.log('PROVIDER_OFFER_RUNTIME_STATE', {
+      profileId: profile.id,
+      providerProfileId: resolvedPpId,
+      online: providerData?.status === 'available',
+      timestamp: Date.now(),
+    });
 
     const today = new Date().toISOString().split('T')[0];
     const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
@@ -758,6 +830,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
   useEffect(() => {
     if (!online || !providerProfileId) return;
+    console.log('PROVIDER_OFFERS_REALTIME_SUBSCRIBE', {
+      providerProfileId,
+      filter: `provider_id=eq.${providerProfileId}`,
+      timestamp: Date.now(),
+    });
     const channel = supabase
       .channel('booking_offers:provider')
       .on(
@@ -768,7 +845,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           table: 'booking_offers',
           filter: `provider_id=eq.${providerProfileId}`,
         },
-        () => {
+        (payload) => {
+          logRealtimeEvent(payload);
           fetchRequestsRef.current();
         },
       )
@@ -780,7 +858,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           table: 'booking_offers',
           filter: `provider_id=eq.${providerProfileId}`,
         },
-        () => {
+        (payload) => {
+          logRealtimeEvent(payload);
           fetchRequestsRef.current();
         },
       )
@@ -792,11 +871,18 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           table: 'booking_offers',
           filter: `provider_id=eq.${providerProfileId}`,
         },
-        () => {
+        (payload) => {
+          logRealtimeEvent(payload);
           fetchRequestsRef.current();
         },
       )
-      .subscribe();
+      .subscribe((status: string) => {
+        console.log('PROVIDER_OFFERS_REALTIME_STATUS', {
+          status,
+          providerProfileId,
+          timestamp: Date.now(),
+        });
+      });
     return () => {
       supabase.removeChannel(channel);
     };
@@ -808,10 +894,21 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // has passed.
   useEffect(() => {
     if (!online || !providerProfileId) return;
+    console.log('PROVIDER_OFFERS_POLLING_STARTED', {
+      providerProfileId,
+      intervalMs: 10000,
+      timestamp: Date.now(),
+    });
     const interval = setInterval(() => {
       fetchRequestsRef.current();
     }, 10000);
-    return () => clearInterval(interval);
+    return () => {
+      console.log('PROVIDER_OFFERS_POLLING_STOPPED', {
+        providerProfileId,
+        timestamp: Date.now(),
+      });
+      clearInterval(interval);
+    };
   }, [online, providerProfileId]);
 
   const onRefresh = async () => {
@@ -1667,6 +1764,21 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       )
     );
   }, [requests, displayBooking, activeJob]);
+
+  useEffect(() => {
+    const requestIds = requests.map(r => r.id);
+    const visibleIds = visibleRequests.map(r => r.id);
+    const hiddenIds = requestIds.filter(id => !visibleIds.includes(id));
+    console.log('PROVIDER_VISIBLE_REQUESTS_RESULT', {
+      requestsCount: requests.length,
+      visibleRequestsCount: visibleRequests.length,
+      visibleBookingIds: visibleIds,
+      hiddenBookingIds: hiddenIds,
+      hiddenReason: hiddenIds.length > 0 ? 'ACTIVE_JOB_TIME_CONFLICT' : null,
+      providerProfileId,
+      timestamp: Date.now(),
+    });
+  }, [requests, visibleRequests, providerProfileId]);
 
   // After Photo visibility: only when the job is started, belongs to this
   // partner, and a before photo already exists.
