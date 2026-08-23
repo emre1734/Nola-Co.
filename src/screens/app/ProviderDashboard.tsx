@@ -572,6 +572,12 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     } | null = null;
     let activeBookingId: string | null = null;
 
+    // Track bookings whose job is already terminal. These must NOT be
+    // restored as acceptedBooking below — their booking row may still be
+    // status='accepted' even though the job is completed/cancelled.
+    const TERMINAL_JOB_STATUSES = ['completed', 'cancelled'];
+    const terminalBookingIds = new Set<string>();
+
     for (const b of acceptedBookings ?? []) {
       try {
         const { data: stateData, error: stateError } = await supabase.functions.invoke('job-progress', {
@@ -599,6 +605,9 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
             };
             activeBookingId = b.id;
             break;
+          }
+          if (TERMINAL_JOB_STATUSES.includes(job.status)) {
+            terminalBookingIds.add(b.id);
           }
         }
       } catch {
@@ -725,11 +734,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
     // ── Priority 2: newly accepted booking waiting for On My Way ─────
     // All accepted bookings were checked via get_state and none had an
-    // active job. The first one is a genuinely newly accepted booking
-    // that hasn't progressed yet.
-    const validBooking = (acceptedBookings && acceptedBookings.length > 0)
-      ? acceptedBookings[0]
-      : null;
+    // active job. Pick the first booking that is NOT terminal — a booking
+    // whose job is completed/cancelled must never be restored as an
+    // actionable acceptedBooking, even if its booking row is still
+    // status='accepted'.
+    const validBooking = (acceptedBookings ?? []).find(b => !terminalBookingIds.has(b.id)) ?? null;
 
     if (validBooking) {
       console.log('ACTIVE_BOOKING_RESTORED', { bookingId: validBooking.id, jobStatus: 'accepted (no job yet)' });
