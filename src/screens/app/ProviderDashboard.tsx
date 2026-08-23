@@ -112,7 +112,7 @@ function logRealtimeEvent(payload: unknown) {
   const p = payload as { eventType?: string; new?: Record<string, unknown>; old?: Record<string, unknown> };
   const newRow = (p.new ?? {}) as { id?: string; booking_id?: string; provider_id?: string; status?: string; wave?: number };
   const oldRow = (p.old ?? {}) as { id?: string; booking_id?: string; provider_id?: string; status?: string; wave?: number };
-  console.log('PROVIDER_OFFERS_REALTIME_EVENT', {
+  console.log('PROVIDER_OFFERS_REALTIME_EVENT ' + JSON.stringify({
     eventType: p.eventType ?? 'UNKNOWN',
     offerId: newRow.id ?? oldRow.id ?? null,
     bookingId: newRow.booking_id ?? oldRow.booking_id ?? null,
@@ -120,7 +120,7 @@ function logRealtimeEvent(payload: unknown) {
     status: newRow.status ?? oldRow.status ?? null,
     wave: newRow.wave ?? oldRow.wave ?? null,
     timestamp: Date.now(),
-  });
+  }));
 }
 
 function OfferCountdown({
@@ -330,19 +330,19 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
   const fetchRequests = useCallback(async () => {
     if (!profile || !providerProfileId) {
-      console.log('PROVIDER_OFFERS_FETCH_SKIPPED', {
+      console.log('PROVIDER_OFFERS_FETCH_SKIPPED ' + JSON.stringify({
         providerProfileId: providerProfileId ?? null,
         online,
         reason: !profile ? 'no_profile' : 'no_provider_profile_id',
         timestamp: Date.now(),
-      });
+      }));
       return;
     }
-    console.log('PROVIDER_OFFERS_FETCH_STARTED', {
+    console.log('PROVIDER_OFFERS_FETCH_STARTED ' + JSON.stringify({
       providerProfileId,
       online,
       timestamp: Date.now(),
-    });
+    }));
     const seq = ++fetchSeqRef.current;
     setRequestsError(null);
     setRequestsLoading(true);
@@ -371,7 +371,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       .order('offered_at', { ascending: false })
       .limit(20);
     setRequestsLoading(false);
-    console.log('PROVIDER_OFFERS_FETCH_RESULT', {
+    console.log('PROVIDER_OFFERS_FETCH_RESULT ' + JSON.stringify({
       providerProfileId,
       resultCount: data?.length ?? 0,
       errorCode: error?.code ?? null,
@@ -392,7 +392,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         expiresAt: offer.expires_at ?? null,
       })),
       timestamp: Date.now(),
-    });
+    }));
     if (seq !== fetchSeqRef.current) return;
     if (error) {
       console.error('[fetchRequests] failed:', {
@@ -422,7 +422,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       offer_expires_at: o.expires_at,
     }));
 
-    console.log('PROVIDER_OFFERS_STATE_SET', {
+    console.log('PROVIDER_OFFERS_STATE_SET ' + JSON.stringify({
       providerProfileId,
       requestCount: allRequests.length,
       bookingIds: allRequests.map(r => r.id),
@@ -435,7 +435,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         expiresAt: o.expires_at,
       })),
       timestamp: Date.now(),
-    });
+    }));
     setRejectedBookingIds(new Set());
     setRequests(allRequests);
   }, [profile, providerProfileId]);
@@ -465,12 +465,12 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
     setStats(providerData as ProviderStats | null);
     setOnline(providerData?.status === 'available');
-    console.log('PROVIDER_OFFER_RUNTIME_STATE', {
+    console.log('PROVIDER_OFFER_RUNTIME_STATE ' + JSON.stringify({
       profileId: profile.id,
       providerProfileId: resolvedPpId,
       online: providerData?.status === 'available',
       timestamp: Date.now(),
-    });
+    }));
 
     const today = new Date().toISOString().split('T')[0];
     const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
@@ -830,11 +830,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
   useEffect(() => {
     if (!online || !providerProfileId) return;
-    console.log('PROVIDER_OFFERS_REALTIME_SUBSCRIBE', {
+    console.log('PROVIDER_OFFERS_REALTIME_SUBSCRIBE ' + JSON.stringify({
       providerProfileId,
       filter: `provider_id=eq.${providerProfileId}`,
       timestamp: Date.now(),
-    });
+    }));
     const channel = supabase
       .channel('booking_offers:provider')
       .on(
@@ -877,11 +877,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         },
       )
       .subscribe((status: string) => {
-        console.log('PROVIDER_OFFERS_REALTIME_STATUS', {
+        console.log('PROVIDER_OFFERS_REALTIME_STATUS ' + JSON.stringify({
           status,
           providerProfileId,
           timestamp: Date.now(),
-        });
+        }));
       });
     return () => {
       supabase.removeChannel(channel);
@@ -894,19 +894,19 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   // has passed.
   useEffect(() => {
     if (!online || !providerProfileId) return;
-    console.log('PROVIDER_OFFERS_POLLING_STARTED', {
+    console.log('PROVIDER_OFFERS_POLLING_STARTED ' + JSON.stringify({
       providerProfileId,
       intervalMs: 10000,
       timestamp: Date.now(),
-    });
+    }));
     const interval = setInterval(() => {
       fetchRequestsRef.current();
     }, 10000);
     return () => {
-      console.log('PROVIDER_OFFERS_POLLING_STOPPED', {
+      console.log('PROVIDER_OFFERS_POLLING_STOPPED ' + JSON.stringify({
         providerProfileId,
         timestamp: Date.now(),
-      });
+      }));
       clearInterval(interval);
     };
   }, [online, providerProfileId]);
@@ -1769,7 +1769,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     const requestIds = requests.map(r => r.id);
     const visibleIds = visibleRequests.map(r => r.id);
     const hiddenIds = requestIds.filter(id => !visibleIds.includes(id));
-    console.log('PROVIDER_VISIBLE_REQUESTS_RESULT', {
+    console.log('PROVIDER_VISIBLE_REQUESTS_RESULT ' + JSON.stringify({
       requestsCount: requests.length,
       visibleRequestsCount: visibleRequests.length,
       visibleBookingIds: visibleIds,
@@ -1777,7 +1777,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       hiddenReason: hiddenIds.length > 0 ? 'ACTIVE_JOB_TIME_CONFLICT' : null,
       providerProfileId,
       timestamp: Date.now(),
-    });
+    }));
   }, [requests, visibleRequests, providerProfileId]);
 
   // After Photo visibility: only when the job is started, belongs to this
