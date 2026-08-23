@@ -10,6 +10,7 @@ import {
 import { Avatar } from '../../components/ui';
 import { Modal } from '../../components/ui/Modal';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLocation } from '../../contexts/LocationContext';
 import { supabase } from '../../lib/supabase';
 import { colors, spacing, typography, radii } from '../../theme';
 import { useTranslation } from '../../i18n/useTranslation';
@@ -23,6 +24,7 @@ interface HomeScreenProps {
 export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScreenProps) {
   const { t } = useTranslation();
   const { profile, signOut } = useAuth();
+  const { coordinates } = useLocation();
   const [checkingProvider, setCheckingProvider] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
@@ -117,9 +119,11 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
           <View style={styles.locationBody}>
             <Text style={styles.locationLabel}>{t('home.locationLabel')}</Text>
             <Text style={styles.locationValue} numberOfLines={1}>
-              {profile?.latitude != null && profile?.longitude != null
-                ? `${profile.latitude.toFixed(4)}, ${profile.longitude.toFixed(4)}`
-                : t('home.locationSet')}
+              {coordinates != null
+                ? `${coordinates.latitude.toFixed(4)}, ${coordinates.longitude.toFixed(4)}`
+                : profile?.latitude != null && profile?.longitude != null
+                  ? `${profile.latitude.toFixed(4)}, ${profile.longitude.toFixed(4)}`
+                  : t('home.locationSet')}
             </Text>
           </View>
           <Text style={styles.locationArrow}>›</Text>
