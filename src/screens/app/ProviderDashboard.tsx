@@ -1237,7 +1237,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     };
 
     const shouldTrack = !!(onMyWayDone && !arrivedDone && displayBooking && providerProfileId);
-    console.log('PROVIDER_TRACKING_EFFECT_STATE', {
+    console.log('PROVIDER_TRACKING_EFFECT_STATE', JSON.stringify({
       displayBookingId: displayBooking?.id ?? null,
       providerProfileId: providerProfileId ?? null,
       onMyWayDone,
@@ -1246,7 +1246,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       jobId: activeJob?.id ?? null,
       shouldTrack,
       ts: Date.now(),
-    });
+    }));
 
     if (!shouldTrack) {
       stopBroadcast();
@@ -1255,13 +1255,14 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
     const sendLocation = (lat: number, lng: number) => {
       const sendBookingId = displayBooking.id;
-      console.log('TRACKING_SEND_LOCATION_ATTEMPT', {
+      console.log('TRACKING_SEND_LOCATION_ATTEMPT', JSON.stringify({
         bookingId: sendBookingId,
         providerProfileId,
-        latitude: lat,
-        longitude: lng,
+        jobId: activeJob?.id ?? null,
+        lat,
+        lng,
         ts: Date.now(),
-      });
+      }));
       console.log('PROVIDER_CURRENT_LOCATION_RENDER', JSON.stringify({
         latitude: lat,
         longitude: lng,
@@ -1278,25 +1279,37 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           updated_at: new Date().toISOString(),
         }, { onConflict: 'booking_id' })
         .then((result: unknown) => {
-          const r = result as { error?: { code?: string; message?: string } | null } | null;
+          const r = result as { error?: { code?: string; message?: string; details?: string | null; hint?: string | null } | null } | null;
           const upsertError = r?.error ?? null;
-          console.log('TRACKING_LOCATION_UPSERT_RESULT', {
+          console.log('TRACKING_LOCATION_UPSERT_RESULT', JSON.stringify({
             bookingId: sendBookingId,
+            jobId: activeJob?.id ?? null,
+            providerId: providerProfileId,
+            lat,
+            lng,
             success: !upsertError,
             errorCode: upsertError?.code ?? null,
             errorMessage: upsertError?.message ?? null,
+            errorDetails: upsertError?.details ?? null,
+            errorHint: upsertError?.hint ?? null,
             ts: Date.now(),
-          });
+          }));
           if (!upsertError) upsertToastShown = false;
         }, (e: unknown) => {
-          const err = e as { code?: string; message?: string } | null;
-          console.log('TRACKING_LOCATION_UPSERT_RESULT', {
+          const err = e as { code?: string; message?: string; details?: string | null; hint?: string | null } | null;
+          console.log('TRACKING_LOCATION_UPSERT_RESULT', JSON.stringify({
             bookingId: sendBookingId,
+            jobId: activeJob?.id ?? null,
+            providerId: providerProfileId,
+            lat,
+            lng,
             success: false,
             errorCode: err?.code ?? null,
             errorMessage: err?.message ?? null,
+            errorDetails: err?.details ?? null,
+            errorHint: err?.hint ?? null,
             ts: Date.now(),
-          });
+          }));
           console.error('[GPS] live location upsert failed', e);
           if (!upsertToastShown) {
             upsertToastShown = true;
@@ -1327,7 +1340,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           console.log('TRACKING_BOOTSTRAP_REJECTED_ACCURACY', { bookingId: displayBooking.id, accuracy, latitude, longitude });
           return;
         }
-        console.log('TRACKING_BOOTSTRAP_POSITION', { bookingId: displayBooking.id, latitude, longitude, accuracy });
+        console.log('TRACKING_BOOTSTRAP_POSITION', JSON.stringify({ bookingId: displayBooking.id, latitude, longitude, accuracy }));
         const ts = pos.timestamp || Date.now();
         latestValid = { lat: latitude, lng: longitude, ts };
         lastLatRef.current = latitude;
@@ -1339,11 +1352,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         }
       },
       (err) => {
-        console.log('TRACKING_BOOTSTRAP_ERROR', {
+        console.log('TRACKING_BOOTSTRAP_ERROR', JSON.stringify({
           bookingId: displayBooking.id,
           code: err.code,
           message: err.message,
-        });
+        }));
         // Bootstrap failure is non-fatal — the continuous watcher remains
         // active and will still attempt to produce positions.
       },
@@ -1362,7 +1375,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           return;
         }
 
-        console.log('TRACKING_WATCH_POSITION', { bookingId: displayBooking.id, latitude, longitude, accuracy, timestamp: ts });
+        console.log('TRACKING_WATCH_POSITION', JSON.stringify({ bookingId: displayBooking.id, latitude, longitude, accuracy, timestamp: ts }));
         latestValid = { lat: latitude, lng: longitude, ts };
         lastLatRef.current = latitude;
         lastLngRef.current = longitude;
@@ -1372,7 +1385,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         if (lastPublishedTs === 0) {
           lastPublishedTs = ts;
           console.log('TRACKING_FIRST_VALID_POSITION', { bookingId: displayBooking.id, latitude, longitude, accuracy });
-          console.log('TRACKING_LOCATION_PUBLISHED', { bookingId: displayBooking.id, latitude, longitude });
+          console.log('TRACKING_LOCATION_PUBLISHED', JSON.stringify({ bookingId: displayBooking.id, latitude, longitude }));
           sendLocation(latitude, longitude);
         }
       },
@@ -1429,7 +1442,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       if (stopped || !latestValid) return;
       if (latestValid.ts <= lastPublishedTs) return;
       lastPublishedTs = latestValid.ts;
-      console.log('TRACKING_LOCATION_PUBLISHED', { bookingId: displayBooking.id, latitude: latestValid.lat, longitude: latestValid.lng });
+      console.log('TRACKING_LOCATION_PUBLISHED', JSON.stringify({ bookingId: displayBooking.id, latitude: latestValid.lat, longitude: latestValid.lng }));
       sendLocation(latestValid.lat, latestValid.lng);
     }, 5000);
 
