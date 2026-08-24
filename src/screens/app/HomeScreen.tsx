@@ -97,9 +97,15 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
   };
 
   const fetchActiveBooking = useCallback(async () => {
+    if (!profile?.id) {
+      setActiveBooking(null);
+      setJobPhase('accepted');
+      return;
+    }
     const { data, error } = await supabase
       .from('bookings')
       .select('id, status, estimated_price, created_at, provider_id, services(name)')
+      .eq('customer_id', profile.id)
       .in('status', ['waiting', 'accepted'])
       .order('created_at', { ascending: false })
       .limit(1)
@@ -134,7 +140,7 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
       }
     }
     setJobPhase('accepted');
-  }, []);
+  }, [profile?.id]);
 
   useEffect(() => {
     fetchPendingCount();
