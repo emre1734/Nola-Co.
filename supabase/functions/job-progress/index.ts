@@ -1229,92 +1229,165 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Verify the booking exists, is accepted, and is assigned to this provider
-    const { data: booking, error: bookingError } = await supabase
-      .from("bookings")
-      .select("id, status, provider_id, customer_id")
-      .eq("id", booking_id)
-      .maybeSingle();
-
-    if (bookingError || !booking) {
-      return new Response(
-        JSON.stringify({ error: "Booking not found" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    if (booking.status === "cancelled") {
-      return new Response(
-        JSON.stringify({ error: "Booking was cancelled by the customer" }),
-        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    if (booking.status === "expired") {
-      return new Response(
-        JSON.stringify({ error: "Booking has expired" }),
-        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    if (booking.provider_id !== providerProfile.id) {
-      return new Response(
-        JSON.stringify({ error: "This booking is not assigned to you" }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    if (booking.status !== "accepted") {
-      return new Response(
-        JSON.stringify({ error: `Booking status is ${booking.status}, expected accepted` }),
-        { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    // Find or create the job row for this booking. Use ordered query + limit
-    // instead of maybeSingle() — if duplicate rows exist, maybeSingle() returns
-    // a 406 error and the old code silently inserted ANOTHER duplicate.
-    const { data: existingJobs, error: existingJobError } = await supabase
-      .from("jobs")
-      .select("id, status")
-      .eq("booking_id", booking_id)
-      .order("created_at", { ascending: false })
-      .limit(1);
-
-    if (existingJobError) {
-      return new Response(
-        JSON.stringify({ error: "Failed to look up job", details: existingJobError.message }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    const existingJob = existingJobs && existingJobs.length > 0 ? existingJobs[0] : null;
-
-    let jobStatus: string;
-    let requiredPreviousStatus: string;
+    // ============================================================
+    // on_my_way: delegate to the provider_on_my_way RPC for an
+    // atomic booking-lock + job creation transition. The RPC
+    // acquires SELECT FOR UPDATE on the booking row, validates
+    // ownership and status, and creates/transitions the job —
+    // all in one transaction. This prevents race conditions with
+    // future customer cancellation.
+    // ============================================================
     if (action === "on_my_way") {
-      jobStatus = "on_the_way";
-      requiredPreviousStatus = "accepted";
-    } else if (action === "arrived") {
-      jobStatus = "arrived";
-      requiredPreviousStatus = "on_the_way";
-    } else {
+      if (!booking_id) {
+        return new Response(
+          JSON.stringify({ error: "booking_id is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const { data: rpcData, error: rpcError } = await supabase
+        .rpc("provider_on_my_way", { p_booking_id: booking_id });
+
+      if (rpcError) {
+        return new Response(
+          JSON.stringify({ error: "Failed to start on-my-way transition", details: rpcError.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const result = rpcData as {
+        success?: boolean;
+        error?: string;
+        status?: string;
+        idempotent?: boolean;
+      };
+
+      if (!result.success) {
+        let statusCode = 409;
+        if (result.error === "Booking not found") statusCode = 404;
+        else if (result.error === "Provider profile not found") statusCode = 403;
+        else if (result.error === "This booking is not assigned to you") statusCode = 403;
+
+        return new Response(
+          JSON.stringify({ error: result.error ?? "Unknown error" }),
+          { status: statusCode, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Fetch customer_id for the push notification (fire-and-forget).
+      const { data: notifBooking } = await supabase
+        .from("bookings")
+        .select("customer_id")
+        .eq("id", booking_id)
+        .maybeSingle();
+
+      if (notifBooking?.customer_id) {
+        sendPushNotification(
+          supabaseUrl, serviceRoleKey,
+          notifBooking.customer_id, "on_the_way", "partnerSelection", booking_id,
+        );
+      }
+
       return new Response(
-        JSON.stringify({ error: `Unknown action: ${action}` }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        JSON.stringify({
+          success: true,
+          status: "on_the_way",
+          ...(result.idempotent ? { idempotent: true } : {}),
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    if (existingJob) {
+    // ============================================================
+    // arrived: transition job from on_the_way to arrived.
+    // This action remains inline — the job already exists by this
+    // point, so no booking row lock is needed.
+    // ============================================================
+    if (action === "arrived") {
+      if (!booking_id) {
+        return new Response(
+          JSON.stringify({ error: "booking_id is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Verify the booking exists, is accepted, and is assigned to this provider
+      const { data: booking, error: bookingError } = await supabase
+        .from("bookings")
+        .select("id, status, provider_id, customer_id")
+        .eq("id", booking_id)
+        .maybeSingle();
+
+      if (bookingError || !booking) {
+        return new Response(
+          JSON.stringify({ error: "Booking not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      if (booking.status === "cancelled") {
+        return new Response(
+          JSON.stringify({ error: "Booking was cancelled by the customer" }),
+          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      if (booking.status === "expired") {
+        return new Response(
+          JSON.stringify({ error: "Booking has expired" }),
+          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      if (booking.provider_id !== providerProfile.id) {
+        return new Response(
+          JSON.stringify({ error: "This booking is not assigned to you" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      if (booking.status !== "accepted") {
+        return new Response(
+          JSON.stringify({ error: `Booking status is ${booking.status}, expected accepted` }),
+          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Find the existing job row for this booking.
+      const { data: existingJobs, error: existingJobError } = await supabase
+        .from("jobs")
+        .select("id, status")
+        .eq("booking_id", booking_id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (existingJobError) {
+        return new Response(
+          JSON.stringify({ error: "Failed to look up job", details: existingJobError.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const existingJob = existingJobs && existingJobs.length > 0 ? existingJobs[0] : null;
+      const jobStatus = "arrived";
+      const requiredPreviousStatus = "on_the_way";
+
+      if (!existingJob) {
+        return new Response(
+          JSON.stringify({ error: "Job not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
       // Idempotent: if the job is already in the target status (e.g. double
-      // click), succeed without re-writing. This prevents spurious 409s for
-      // the common double-tap case.
+      // click), succeed without re-writing.
       if (existingJob.status === jobStatus) {
         return new Response(
           JSON.stringify({ success: true, status: jobStatus, idempotent: true }),
           { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
+
       // Validate the job is in the expected previous status.
       if (existingJob.status !== requiredPreviousStatus) {
         return new Response(
@@ -1326,6 +1399,7 @@ Deno.serve(async (req: Request) => {
           { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
+
       const { error: updateError } = await supabase
         .from("jobs")
         .update({ status: jobStatus })
@@ -1340,39 +1414,24 @@ Deno.serve(async (req: Request) => {
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
-    } else {
-      const { error: insertError } = await supabase
-        .from("jobs")
-        .insert({
-          booking_id: booking_id,
-          provider_id: providerProfile.id,
-          customer_id: booking.customer_id,
-          status: jobStatus,
-        });
 
-      if (insertError) {
-        return new Response(
-          JSON.stringify({
-            error: "Failed to create job",
-            details: insertError.message,
-          }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
+      // Send push notification to the customer.
+      // Fire-and-forget — notification failure must never block the action.
+      sendPushNotification(
+        supabaseUrl, serviceRoleKey,
+        booking.customer_id, "arrived", "partnerSelection", booking_id,
+      );
+
+      return new Response(
+        JSON.stringify({ success: true, status: jobStatus }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
-    // Send push notification to the customer for status changes.
-    // Fire-and-forget — notification failure must never block the action.
-    const notifType = action === "on_my_way" ? "on_the_way" : "arrived";
-    const notifScreen = action === "on_my_way" ? "partnerSelection" : "partnerSelection";
-    sendPushNotification(
-      supabaseUrl, serviceRoleKey,
-      booking.customer_id, notifType, notifScreen, booking_id,
-    );
-
+    // Unknown action — neither on_my_way nor arrived
     return new Response(
-      JSON.stringify({ success: true, status: jobStatus }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      JSON.stringify({ error: `Unknown action: ${action}` }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
     return new Response(
