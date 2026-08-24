@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,24 @@ import { useLocation } from '../../contexts/LocationContext';
 import { supabase } from '../../lib/supabase';
 import { colors, spacing, typography, radii } from '../../theme';
 import { useTranslation } from '../../i18n/useTranslation';
+import { WasherTrackingMap } from '../../components/WasherTrackingMap';
+
+interface ActiveBooking {
+  id: string;
+  status: string;
+  estimated_price: number | null;
+  created_at: string | null;
+  provider_id: string | null;
+  services?: { name: string } | null;
+}
+
+type ActiveJobPhase =
+  | 'waiting'
+  | 'accepted'
+  | 'on_the_way'
+  | 'arrived'
+  | 'started'
+  | 'pending_approval';
 
 interface HomeScreenProps {
   onNavigate: (dest: 'customerHome' | 'providerDashboard' | 'providerOnboarding' | 'myVehicles' | 'booking' | 'approvalCenter' | 'bookingHistory' | 'settings') => void;
@@ -28,6 +46,11 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
   const [checkingProvider, setCheckingProvider] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [activeBooking, setActiveBooking] = useState<ActiveBooking | null>(null);
+  const [jobPhase, setJobPhase] = useState<ActiveJobPhase>('accepted');
+  const [trackingBookingId, setTrackingBookingId] = useState<string | null>(null);
+  const activeBookingRef = useRef<ActiveBooking | null>(null);
+  activeBookingRef.current = activeBooking;
 
   const handleWashTap = () => {
     onNavigate('booking');
@@ -73,12 +96,140 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
     }
   };
 
+  const fetchActiveBooking = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('id, status, estimated_price, created_at, provider_id, services(name)')
+      .in('status', ['waiting', 'accepted'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) {
+      setActiveBooking(null);
+      setJobPhase('accepted');
+      return;
+    }
+    const ab = data as unknown as ActiveBooking;
+    setActiveBooking(ab);
+
+    if (ab.status === 'waiting') {
+      setJobPhase('waiting');
+      return;
+    }
+
+    // accepted — determine job phase via the existing secure RPC.
+    // The RPC returns an empty set unless the job is on_the_way, so
+    // absence means the job is in another active phase (arrived,
+    // started, pending_approval) or not yet created.
+    if (ab.provider_id) {
+      const { data: rpcData } = await supabase.rpc('get_assigned_washer_location', {
+        p_booking_id: ab.id,
+      });
+      if (rpcData && Array.isArray(rpcData) && rpcData.length > 0) {
+        const row = rpcData[0] as { job_status?: string };
+        if (row.job_status === 'on_the_way') {
+          setJobPhase('on_the_way');
+          return;
+        }
+      }
+    }
+    setJobPhase('accepted');
+  }, []);
+
   useEffect(() => {
     fetchPendingCount();
-  }, []);
+    fetchActiveBooking();
+  }, [fetchActiveBooking]);
+
+  // Resync when the customer returns to the app (tab becomes visible).
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchActiveBooking();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [fetchActiveBooking]);
+
+  // Realtime: listen for job status changes so the active reservation
+  // card updates without a manual refresh while the app is open.
+  useEffect(() => {
+    if (!activeBooking) return;
+    const channel = supabase
+      .channel(`home-job:${activeBooking.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'jobs',
+          filter: `booking_id=eq.${activeBooking.id}`,
+        },
+        (payload) => {
+          const newStatus = (payload.new as { status?: string })?.status;
+          if (newStatus === 'on_the_way') {
+            setJobPhase('on_the_way');
+          } else if (newStatus === 'arrived') {
+            setJobPhase('arrived');
+          } else if (newStatus === 'started') {
+            setJobPhase('started');
+          } else if (newStatus === 'pending_approval') {
+            setJobPhase('pending_approval');
+          } else if (newStatus === 'completed' || newStatus === 'cancelled') {
+            fetchActiveBooking();
+          }
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeBooking, fetchActiveBooking]);
 
   const handleApprovalTap = () => {
     if (pendingCount > 0) onNavigate('approvalCenter');
+  };
+
+  const phaseLabel = (phase: ActiveJobPhase): string => {
+    switch (phase) {
+      case 'waiting':
+        return t('home.activeWaiting');
+      case 'on_the_way':
+        return t('home.activeOnTheWay');
+      case 'arrived':
+        return t('home.activeArrived');
+      case 'started':
+        return t('home.activeStarted');
+      case 'pending_approval':
+        return t('home.activePendingApproval');
+      default:
+        return t('home.activeAccepted');
+    }
+  };
+
+  const phaseHint = (phase: ActiveJobPhase): string => {
+    if (phase === 'waiting') return t('home.activeWaitingHint');
+    return t('home.activeAcceptedHint');
+  };
+
+  const phaseColor = (phase: ActiveJobPhase): string => {
+    if (phase === 'waiting') return colors.warning;
+    if (phase === 'on_the_way') return colors.primary;
+    if (phase === 'arrived' || phase === 'started') return colors.success;
+    if (phase === 'pending_approval') return colors.error;
+    return colors.primary;
+  };
+
+  const phaseIcon = (phase: ActiveJobPhase): string => {
+    if (phase === 'waiting') return '🔍';
+    if (phase === 'on_the_way') return '🚗';
+    if (phase === 'arrived') return '📍';
+    if (phase === 'started') return '🧽';
+    if (phase === 'pending_approval') return '✅';
+    return '✓';
   };
 
   return (
@@ -128,6 +279,40 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
           </View>
           <Text style={styles.locationArrow}>›</Text>
         </TouchableOpacity>
+
+        {/* Active Reservation — shown when the customer has a current
+            booking in waiting or accepted status. Recovered from server
+            state on mount and when the app regains visibility. */}
+        {activeBooking && (
+          <View style={styles.activeCard}>
+            <View style={styles.activeHeader}>
+              <View style={[styles.activeIconWrap, { backgroundColor: phaseColor(jobPhase) + '18' }]}>
+                <Text style={styles.activeIcon}>{phaseIcon(jobPhase)}</Text>
+              </View>
+              <View style={styles.activeBody}>
+                <Text style={styles.activeTitle}>{t('home.activeReservationTitle')}</Text>
+                <Text style={styles.activeService}>
+                  {(activeBooking.services as any)?.name ?? t('customerHome.washServiceFallback')}
+                </Text>
+              </View>
+              <View style={[styles.activeBadge, { backgroundColor: phaseColor(jobPhase) + '25' }]}>
+                <Text style={[styles.activeBadgeText, { color: phaseColor(jobPhase) }]}>
+                  {phaseLabel(jobPhase)}
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.activeHint}>{phaseHint(jobPhase)}</Text>
+            {jobPhase === 'on_the_way' && (
+              <TouchableOpacity
+                style={styles.activeTrackBtn}
+                onPress={() => setTrackingBookingId(activeBooking.id)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.activeTrackBtnText}>{t('home.activeTrackBtn')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {/* Pending Service Approval — shown at the top when there are
             jobs in pending_approval. Premium red banner with View action. */}
@@ -286,6 +471,13 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
         onConfirm={handleLogout}
         confirmVariant="danger"
       />
+
+      {trackingBookingId && (
+        <WasherTrackingMap
+          bookingId={trackingBookingId}
+          onClose={() => setTrackingBookingId(null)}
+        />
+      )}
     </View>
   );
 }
@@ -381,6 +573,48 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   pendingViewText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+
+  activeCard: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radii.xl,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    borderWidth: 1.5,
+    borderColor: colors.primary + '40',
+  },
+  activeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  activeIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  activeIcon: { fontSize: 22 },
+  activeBody: { flex: 1 },
+  activeTitle: { ...typography.h4, marginBottom: 2 },
+  activeService: { ...typography.bodySmall, color: colors.textSecondary },
+  activeBadge: {
+    borderRadius: radii.full,
+    paddingVertical: 3,
+    paddingHorizontal: 10,
+    flexShrink: 0,
+  },
+  activeBadgeText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
+  activeHint: { ...typography.bodySmall, color: colors.textMuted, marginBottom: spacing.sm },
+  activeTrackBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radii.lg,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  activeTrackBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 
   card: {
     flexDirection: 'row',
