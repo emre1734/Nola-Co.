@@ -127,20 +127,21 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
       return;
     }
 
-    // accepted — determine job phase via the existing secure RPC.
-    // The RPC returns an empty set unless the job is on_the_way, so
-    // absence means the job is in another active phase (arrived,
-    // started, pending_approval) or not yet created.
+    // accepted — determine job phase via the customer-safe status RPC.
+    // Returns { success, job_status } where job_status may be null (no job yet)
+    // or one of: on_the_way, arrived, started, pending_approval, completed, cancelled.
     if (ab.provider_id) {
-      const { data: rpcData } = await supabase.rpc('get_assigned_washer_location', {
+      const { data: statusData } = await supabase.rpc('get_customer_booking_job_status', {
         p_booking_id: ab.id,
       });
-      if (rpcData && Array.isArray(rpcData) && rpcData.length > 0) {
-        const row = rpcData[0] as { job_status?: string };
-        if (row.job_status === 'on_the_way') {
-          setJobPhase('on_the_way');
-          return;
-        }
+      const statusResult = statusData as { success?: boolean; job_status?: string | null } | null;
+      if (statusResult?.success) {
+        const js = statusResult.job_status;
+        if (js === 'on_the_way') { setJobPhase('on_the_way'); return; }
+        if (js === 'arrived') { setJobPhase('arrived'); return; }
+        if (js === 'started') { setJobPhase('started'); return; }
+        if (js === 'pending_approval') { setJobPhase('pending_approval'); return; }
+        if (js === 'completed' || js === 'cancelled') { return; }
       }
     }
     setJobPhase('accepted');
@@ -164,39 +165,29 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
     };
   }, [fetchActiveBooking]);
 
-  // Realtime: listen for job status changes so the active reservation
-  // card updates without a manual refresh while the app is open.
+  // Foreground polling: while an accepted booking is active, poll the
+  // customer-safe status RPC every 5 seconds so the reservation card
+  // reflects job phase changes (on_the_way, arrived, started, etc.) in
+  // near real time. Stops once the phase leaves accepted/waiting or the
+  // booking is cleared.
   useEffect(() => {
-    if (!activeBooking) return;
-    const channel = supabase
-      .channel(`home-job:${activeBooking.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'jobs',
-          filter: `booking_id=eq.${activeBooking.id}`,
-        },
-        (payload) => {
-          const newStatus = (payload.new as { status?: string })?.status;
-          if (newStatus === 'on_the_way') {
-            setJobPhase('on_the_way');
-          } else if (newStatus === 'arrived') {
-            setJobPhase('arrived');
-          } else if (newStatus === 'started') {
-            setJobPhase('started');
-          } else if (newStatus === 'pending_approval') {
-            setJobPhase('pending_approval');
-          } else if (newStatus === 'completed' || newStatus === 'cancelled') {
-            fetchActiveBooking();
-          }
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    if (!activeBooking || activeBooking.status !== 'accepted') return;
+    const interval = setInterval(() => {
+      (async () => {
+        const { data } = await supabase.rpc('get_customer_booking_job_status', {
+          p_booking_id: activeBooking.id,
+        });
+        const result = data as { success?: boolean; job_status?: string | null } | null;
+        if (!result?.success) return;
+        const js = result.job_status;
+        if (js === 'on_the_way') setJobPhase('on_the_way');
+        else if (js === 'arrived') setJobPhase('arrived');
+        else if (js === 'started') setJobPhase('started');
+        else if (js === 'pending_approval') setJobPhase('pending_approval');
+        else if (js === 'completed' || js === 'cancelled') fetchActiveBooking();
+      })();
+    }, 5000);
+    return () => clearInterval(interval);
   }, [activeBooking, fetchActiveBooking]);
 
   const handleCancelBooking = async () => {
