@@ -1245,7 +1245,24 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const { data: rpcData, error: rpcError } = await supabase
+      // The provider_on_my_way RPC resolves the provider via auth.uid(),
+      // so the call must carry the provider's JWT. The service-role client
+      // has no user context (auth.uid() is NULL), so create a user-scoped
+      // client that forwards the provider's Bearer token to PostgREST.
+      const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+      const userSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+        global: {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      });
+
+      const { data: rpcData, error: rpcError } = await userSupabase
         .rpc("provider_on_my_way", { p_booking_id: booking_id });
 
       if (rpcError) {
