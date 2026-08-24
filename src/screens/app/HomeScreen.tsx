@@ -11,6 +11,7 @@ import { Avatar } from '../../components/ui';
 import { Modal } from '../../components/ui/Modal';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLocation } from '../../contexts/LocationContext';
+import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
 import { colors, spacing, typography, radii } from '../../theme';
 import { useTranslation } from '../../i18n/useTranslation';
@@ -43,12 +44,15 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
   const { t } = useTranslation();
   const { profile, signOut } = useAuth();
   const { coordinates } = useLocation();
+  const { showToast } = useToast();
   const [checkingProvider, setCheckingProvider] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [activeBooking, setActiveBooking] = useState<ActiveBooking | null>(null);
   const [jobPhase, setJobPhase] = useState<ActiveJobPhase>('accepted');
   const [trackingBookingId, setTrackingBookingId] = useState<string | null>(null);
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const activeBookingRef = useRef<ActiveBooking | null>(null);
   activeBookingRef.current = activeBooking;
 
@@ -195,6 +199,37 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
     };
   }, [activeBooking, fetchActiveBooking]);
 
+  const handleCancelBooking = async () => {
+    if (!activeBooking || cancelling) return;
+    setCancelling(true);
+    try {
+      const { data, error } = await supabase.rpc('cancel_booking', {
+        p_booking_id: activeBooking.id,
+      });
+      if (error) {
+        showToast(t('home.cancelError'), 'error');
+        return;
+      }
+      const result = data as { success?: boolean; error?: string };
+      if (result?.success) {
+        setActiveBooking(null);
+        setJobPhase('accepted');
+        setShowCancelConfirm(false);
+        showToast(t('home.cancelSuccess'), 'success');
+      } else if (result?.error === 'not_cancellable') {
+        setShowCancelConfirm(false);
+        showToast(t('home.cancelNotCancellable'), 'error');
+        await fetchActiveBooking();
+      } else {
+        showToast(t('home.cancelError'), 'error');
+      }
+    } catch {
+      showToast(t('home.cancelError'), 'error');
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   const handleApprovalTap = () => {
     if (pendingCount > 0) onNavigate('approvalCenter');
   };
@@ -315,6 +350,16 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
                 activeOpacity={0.85}
               >
                 <Text style={styles.activeTrackBtnText}>{t('home.activeTrackBtn')}</Text>
+              </TouchableOpacity>
+            )}
+            {(jobPhase === 'waiting' || jobPhase === 'accepted') && (
+              <TouchableOpacity
+                style={styles.activeCancelBtn}
+                onPress={() => setShowCancelConfirm(true)}
+                activeOpacity={0.85}
+                disabled={cancelling}
+              >
+                <Text style={styles.activeCancelBtnText}>{t('home.cancelBooking')}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -478,6 +523,17 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
         confirmVariant="danger"
       />
 
+      <Modal
+        visible={showCancelConfirm}
+        onClose={() => { if (!cancelling) setShowCancelConfirm(false); }}
+        title={t('home.cancelConfirmTitle')}
+        message={t('home.cancelConfirmMessage')}
+        confirmLabel={cancelling ? t('home.cancelling') : t('home.cancelConfirmConfirm')}
+        cancelLabel={t('home.cancelConfirmCancel')}
+        onConfirm={handleCancelBooking}
+        confirmVariant="danger"
+      />
+
       {trackingBookingId && (
         <WasherTrackingMap
           bookingId={trackingBookingId}
@@ -621,6 +677,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   activeTrackBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  activeCancelBtn: {
+    borderRadius: radii.lg,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: spacing.xs,
+    borderWidth: 1.5,
+    borderColor: colors.error + '50',
+  },
+  activeCancelBtnText: { color: colors.error, fontWeight: '700', fontSize: 15 },
 
   card: {
     flexDirection: 'row',
