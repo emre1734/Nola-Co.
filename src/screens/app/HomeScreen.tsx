@@ -141,7 +141,11 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
         if (js === 'arrived') { setJobPhase('arrived'); return; }
         if (js === 'started') { setJobPhase('started'); return; }
         if (js === 'pending_approval') { setJobPhase('pending_approval'); return; }
-        if (js === 'completed' || js === 'cancelled') { return; }
+        if (js === 'completed' || js === 'cancelled') {
+          setActiveBooking(null);
+          setJobPhase('accepted');
+          return;
+        }
       }
     }
     setJobPhase('accepted');
@@ -184,7 +188,10 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
         else if (js === 'arrived') setJobPhase('arrived');
         else if (js === 'started') setJobPhase('started');
         else if (js === 'pending_approval') setJobPhase('pending_approval');
-        else if (js === 'completed' || js === 'cancelled') fetchActiveBooking();
+        else if (js === 'completed' || js === 'cancelled') {
+          setActiveBooking(null);
+          setJobPhase('accepted');
+        }
       })();
     }, 5000);
     return () => clearInterval(interval);
