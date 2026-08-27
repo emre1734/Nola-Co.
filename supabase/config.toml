@@ -1,0 +1,11 @@
+[functions.google-maps-key]
+verify_jwt = false
+
+[functions.job-progress]
+verify_jwt = true
+
+[functions.push-notifications]
+verify_jwt = false
+
+[functions.delete-account]
+verify_jwt = true
