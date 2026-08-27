@@ -19,6 +19,97 @@ interface ManifestRow {
   stage: string;
 }
 
+const PAGE_SIZE = 1000;
+const MAX_DEPTH = 32;
+
+/**
+ * Generic recursive prefix walker for Supabase Storage.
+ *
+ * Recursively traverses folders under `prefix` until no deeper
+ * prefixes remain. Supports arbitrary nesting depth. Paginates
+ * at EVERY directory level. Collects exact object paths only —
+ * never deletes an entire bucket, never leaves the recorded prefix.
+ *
+ * - already-missing objects = success/no-op
+ * - empty folders = no-op
+ * - retry-safe (re-listing yields the same or fewer objects)
+ * - avoids infinite recursion via MAX_DEPTH guard
+ */
+async function listAllObjects(
+  serviceClient: ReturnType<typeof createClient>,
+  bucket: string,
+  prefix: string,
+): Promise<{ paths: string[]; error: string | null }> {
+  const allPaths: string[] = [];
+
+  async function walk(currentPrefix: string, depth: number): Promise<string | null> {
+    if (depth > MAX_DEPTH) {
+      return `max depth exceeded at ${currentPrefix}`;
+    }
+
+    let offset = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data: listData, error: listError } = await serviceClient.storage
+        .from(bucket)
+        .list(currentPrefix, {
+          limit: PAGE_SIZE,
+          offset: offset,
+          sortBy: { column: "name", order: "asc" },
+        });
+
+      if (listError) {
+        // Folder doesn't exist or is empty — treat as success
+        if (
+          listError.message?.includes("not found") ||
+          listError.message?.includes("404") ||
+          listError.message?.includes("The resource was not found")
+        ) {
+          return null;
+        }
+        return `list failed for ${bucket}/${currentPrefix}: ${listError.message}`;
+      }
+
+      const items = listData ?? [];
+      if (items.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      for (const item of items) {
+        const itemPath = currentPrefix + item.name;
+
+        // A folder has no metadata/id (null). An object file has both.
+        const isFolder = item.metadata === null && item.id === null;
+
+        if (isFolder) {
+          // Recurse into subfolder
+          const subPrefix = itemPath.endsWith("/") ? itemPath : itemPath + "/";
+          const subError = await walk(subPrefix, depth + 1);
+          if (subError) return subError;
+        } else {
+          allPaths.push(itemPath);
+        }
+      }
+
+      if (items.length < PAGE_SIZE) {
+        hasMore = false;
+      } else {
+        offset += PAGE_SIZE;
+      }
+    }
+
+    return null;
+  }
+
+  const walkError = await walk(prefix, 0);
+  if (walkError) {
+    return { paths: allPaths, error: walkError };
+  }
+  return { paths: allPaths, error: null };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -92,7 +183,19 @@ Deno.serve(async (req: Request) => {
       role?: string;
       request_id?: string;
       stage?: string;
+      error?: string;
     };
+
+    // FAIL CLOSED: inconsistent state (profile missing + manifest missing)
+    // The RPC returns success:false with error:deletion_state_inconsistent.
+    // Auth deletion MUST NOT execute. Translate to non-sensitive public response.
+    if (result && result.success === false && result.error === "deletion_state_inconsistent") {
+      console.error("[delete-account] inconsistent state: profile missing + manifest missing");
+      return new Response(
+        JSON.stringify({ success: false, error: "account_deletion_incomplete" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     // If blocked, return safe blocker response
     if (result && result.eligible === false) {
@@ -141,71 +244,20 @@ Deno.serve(async (req: Request) => {
 
       for (const target of targets) {
         try {
-          // List all objects under the prefix (handles pagination)
-          let allPaths: string[] = [];
-          let offset = 0;
-          const pageSize = 1000;
-          let hasMore = true;
+          // Generic recursive traversal — handles arbitrary nesting depth
+          const { paths: allPaths, error: walkError } = await listAllObjects(
+            serviceClient,
+            target.bucket,
+            target.prefix,
+          );
 
-          while (hasMore) {
-            const { data: listData, error: listError } = await serviceClient.storage
-              .from(target.bucket)
-              .list(target.prefix, {
-                limit: pageSize,
-                offset: offset,
-                sortBy: { column: "name", order: "asc" },
-              });
-
-            if (listError) {
-              // If the folder doesn't exist, treat as success
-              if (listError.message?.includes("not found") || listError.message?.includes("404")) {
-                hasMore = false;
-                break;
-              }
-              console.error(`[delete-account] list failed for ${target.bucket}/${target.prefix}:`, listError.message);
-              storageFailed = true;
-              break;
-            }
-
-            const items = listData ?? [];
-            if (items.length === 0) {
-              hasMore = false;
-              break;
-            }
-
-            for (const item of items) {
-              const itemPath = target.prefix + item.name;
-              if (item.metadata === null || item.id === null) {
-                // It's a folder — recursively list
-                // For simplicity, we treat folders by listing with the sub-prefix
-                const subPrefix = itemPath.endsWith("/") ? itemPath : itemPath + "/";
-                const { data: subItems, error: subError } = await serviceClient.storage
-                  .from(target.bucket)
-                  .list(subPrefix, { limit: 1000, offset: 0 });
-
-                if (subError) {
-                  continue;
-                }
-                for (const subItem of subItems ?? []) {
-                  if (subItem.metadata !== null && subItem.id !== null) {
-                    allPaths.push(subPrefix + subItem.name);
-                  }
-                }
-              } else {
-                allPaths.push(itemPath);
-              }
-            }
-
-            if (items.length < pageSize) {
-              hasMore = false;
-            } else {
-              offset += pageSize;
-            }
+          if (walkError) {
+            console.error(`[delete-account] traversal failed for ${target.bucket}/${target.prefix}:`, walkError);
+            storageFailed = true;
+            break;
           }
 
-          if (storageFailed) break;
-
-          // Delete all found objects
+          // Delete all found objects (missing objects = success/no-op)
           if (allPaths.length > 0) {
             const { error: deleteError } = await serviceClient.storage
               .from(target.bucket)
