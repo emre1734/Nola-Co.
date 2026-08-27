@@ -5,21 +5,27 @@ import { LANGUAGES } from '../../i18n';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
-import { Button } from '../../components/ui';
+import { Button, Modal } from '../../components/ui';
 import { colors, spacing, typography, radii } from '../../theme';
+import { supabase } from '../../lib/supabase';
 
 interface SettingsScreenProps {
   onBack: () => void;
   onSignOut: () => void;
 }
 
+type DeleteStep = 'idle' | 'checking' | 'confirm1' | 'confirm2' | 'deleting';
+
 export function SettingsScreen({ onBack, onSignOut }: SettingsScreenProps) {
   const { t, locale, setLocale } = useTranslation();
   const { permission, notificationsEnabled, setNotificationsEnabled, requestPermission } = useNotifications();
-  const { session, emailVerified, resendVerification, profile } = useAuth();
+  const { session, emailVerified, resendVerification, profile, signOut } = useAuth();
   const { showToast } = useToast();
   const [resendCooldown, setResendCooldown] = useState(0);
   const [copiedId, setCopiedId] = useState(false);
+
+  const [deleteStep, setDeleteStep] = useState<DeleteStep>('idle');
+  const [blockerMessage, setBlockerMessage] = useState<string | null>(null);
 
   const handleCopyId = async () => {
     if (!profile?.wishwash_id) return;
@@ -49,6 +55,111 @@ export function SettingsScreen({ onBack, onSignOut }: SettingsScreenProps) {
       }, 1000);
     }
   };
+
+  const getBlockerMessage = (blocker: string): string => {
+    switch (blocker) {
+      case 'active_customer_booking':
+        return t('settings.deleteAccountBlockedBooking');
+      case 'active_customer_job':
+        return t('settings.deleteAccountBlockedJob');
+      case 'active_provider_booking':
+        return t('settings.deleteAccountBlockedProviderBooking');
+      case 'active_provider_job':
+        return t('settings.deleteAccountBlockedProviderJob');
+      default:
+        return t('settings.deleteAccountBlockedGeneric');
+    }
+  };
+
+  const handleDeleteTap = async () => {
+    if (deleteStep !== 'idle') return;
+    setDeleteStep('checking');
+    setBlockerMessage(null);
+
+    try {
+      const { data, error } = await supabase.rpc('get_account_deletion_eligibility');
+
+      if (error) {
+        setDeleteStep('idle');
+        showToast(t('settings.deleteAccountEligibilityError'), 'error');
+        return;
+      }
+
+      const result = data as { success: boolean; eligible?: boolean; blocker?: string; error?: string };
+
+      if (!result || result.success === false) {
+        setDeleteStep('idle');
+        showToast(t('settings.deleteAccountEligibilityError'), 'error');
+        return;
+      }
+
+      if (result.eligible === false) {
+        setDeleteStep('idle');
+        setBlockerMessage(getBlockerMessage(result.blocker ?? ''));
+        return;
+      }
+
+      setDeleteStep('confirm1');
+    } catch {
+      setDeleteStep('idle');
+      showToast(t('settings.deleteAccountEligibilityError'), 'error');
+    }
+  };
+
+  const handleConfirm1Cancel = () => {
+    setDeleteStep('idle');
+  };
+
+  const handleConfirm1Proceed = () => {
+    setDeleteStep('confirm2');
+  };
+
+  const handleConfirm2Cancel = () => {
+    setDeleteStep('idle');
+  };
+
+  const handleConfirm2Proceed = async () => {
+    setDeleteStep('deleting');
+
+    try {
+      const { data, error } = await supabase.functions.invoke('delete-account', {
+        body: {},
+      });
+
+      if (error) {
+        setDeleteStep('idle');
+        showToast(t('settings.deleteAccountError'), 'error');
+        return;
+      }
+
+      const result = data as { success: boolean; eligible?: boolean; blocker?: string; error?: string };
+
+      if (result && result.success === true && result.eligible === false) {
+        setDeleteStep('idle');
+        setBlockerMessage(getBlockerMessage(result.blocker ?? ''));
+        return;
+      }
+
+      if (!result || result.success === false) {
+        setDeleteStep('idle');
+        showToast(t('settings.deleteAccountError'), 'error');
+        return;
+      }
+
+      // Success — sign out and navigate to login
+      try {
+        await signOut();
+      } catch {
+        // Backend may have already deleted the auth account — force local reset
+      }
+      onSignOut();
+    } catch {
+      setDeleteStep('idle');
+      showToast(t('settings.deleteAccountError'), 'error');
+    }
+  };
+
+  const isDeleteBusy = deleteStep === 'checking' || deleteStep === 'deleting';
 
   return (
     <View style={styles.container}>
@@ -201,7 +312,54 @@ export function SettingsScreen({ onBack, onSignOut }: SettingsScreenProps) {
             <Text style={styles.countryNameMuted}>{t('settings.moreCountries')}</Text>
           </View>
         </View>
+
+        {/* Danger zone — Delete Account */}
+        <Text style={[styles.sectionTitle, { marginTop: spacing.xl, color: colors.error }]}>
+          {t('settings.deleteAccountSection')}
+        </Text>
+        <View style={styles.dangerCard}>
+          <Button
+            label={
+              deleteStep === 'checking'
+                ? t('settings.deleteAccountChecking')
+                : deleteStep === 'deleting'
+                  ? t('settings.deleteAccountDeleting')
+                  : t('settings.deleteAccountButton')
+            }
+            onPress={handleDeleteTap}
+            variant="danger"
+            loading={isDeleteBusy}
+            disabled={isDeleteBusy}
+          />
+          {blockerMessage && (
+            <Text style={styles.blockerMessage}>{blockerMessage}</Text>
+          )}
+        </View>
       </ScrollView>
+
+      {/* First confirmation modal */}
+      <Modal
+        visible={deleteStep === 'confirm1'}
+        onClose={handleConfirm1Cancel}
+        title={t('settings.deleteAccountConfirm1Title')}
+        message={t('settings.deleteAccountConfirm1Message')}
+        confirmLabel={t('settings.deleteAccountConfirm1Confirm')}
+        cancelLabel={t('settings.deleteAccountConfirm1Cancel')}
+        onConfirm={handleConfirm1Proceed}
+        confirmVariant="danger"
+      />
+
+      {/* Second confirmation modal */}
+      <Modal
+        visible={deleteStep === 'confirm2'}
+        onClose={handleConfirm2Cancel}
+        title={t('settings.deleteAccountConfirm2Title')}
+        message={t('settings.deleteAccountConfirm2Message')}
+        confirmLabel={t('settings.deleteAccountConfirm2Confirm')}
+        cancelLabel={t('settings.deleteAccountConfirm2Cancel')}
+        onConfirm={handleConfirm2Proceed}
+        confirmVariant="danger"
+      />
     </View>
   );
 }
@@ -303,4 +461,19 @@ const styles = StyleSheet.create({
   verifiedBadge: { fontSize: 24 },
   unverifiedBadge: { fontSize: 24 },
   resendBtn: { marginTop: spacing.sm },
+
+  dangerCard: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.error + '40',
+    marginBottom: spacing.sm,
+  },
+  blockerMessage: {
+    ...typography.bodySmall,
+    color: colors.error,
+    marginTop: spacing.sm,
+    lineHeight: 20,
+  },
 });
