@@ -31,11 +31,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
   const [emailVerified, setEmailVerified] = useState(false);
 
-  const fetchProfile = useCallback(async (userId: string): Promise<Profile | null> => {
+  const fetchProfile = useCallback(async (_userId: string): Promise<Profile | null> => {
     const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
+      .rpc('get_my_profile')
       .maybeSingle();
     if (error || !data) return null;
     return data as Profile;
