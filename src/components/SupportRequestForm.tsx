@@ -158,11 +158,11 @@ export function SupportRequestForm({
       let uploadFailed = false;
       for (const p of photos) {
         const result = await uploadSupportPhoto(userId, bookingId, p.file);
-        if (result.error || !result.url) {
+        if (result.error || !result.path) {
           uploadFailed = true;
           break;
         }
-        uploaded.push(result.url);
+        uploaded.push(result.path);
       }
       setUploadingPhoto(false);
       if (uploadFailed) {

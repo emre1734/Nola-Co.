@@ -24,6 +24,7 @@ import {
   validateJobPhoto,
   uploadJobPhoto,
 } from '../../lib/job-photo';
+import { createJobImageSignedUrl } from '../../lib/job-image-resolver';
 import { watchPosition, clearWatch, getCurrentPosition } from '../../lib/native-gps';
 import { useLocation } from '../../contexts/LocationContext';
 import { useTranslation } from '../../i18n/useTranslation';
@@ -645,11 +646,11 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       setSendApprovalDone(st === 'pending_approval');
       setCustomerApproved(false);
       if (activeJobData.before_photo_url) {
-        setPhotoPreview(activeJobData.before_photo_url);
+        setPhotoPreview(await createJobImageSignedUrl(activeJobData.before_photo_url));
         setPhotoUploaded(true);
       }
       if (activeJobData.after_photo_url) {
-        setAfterPhotoPreview(activeJobData.after_photo_url);
+        setAfterPhotoPreview(await createJobImageSignedUrl(activeJobData.after_photo_url));
         setAfterPhotoUploaded(true);
       }
       return;
@@ -1487,7 +1488,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       }
       const url = job?.before_photo_url ?? null;
       if (url) {
-        setPhotoPreview(url);
+        setPhotoPreview(await createJobImageSignedUrl(url));
         setPhotoUploaded(true);
       }
       // If job already advanced past arrived, reflect that.
@@ -1496,7 +1497,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
       }
       const afterUrl = job?.after_photo_url ?? null;
       if (afterUrl) {
-        setAfterPhotoPreview(afterUrl);
+        setAfterPhotoPreview(await createJobImageSignedUrl(afterUrl));
         setAfterPhotoUploaded(true);
       }
     } catch {
@@ -1644,25 +1645,25 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
 
       // 2. Upload to Storage using {userId}/{jobId}/before-{ts}.{ext}
-      const { url, path, error: uploadErr } = await uploadJobPhoto(
+      const { path, error: uploadErr } = await uploadJobPhoto(
         profile.id,
         jobId,
         photoFile,
       );
-      if (uploadErr || !url) {
+      if (uploadErr || !path) {
         console.error('[before-photo] storage upload failed:', { error: uploadErr, path });
         setPhotoError(uploadErr ?? t('provider.errUploadFailed'));
         showToast(t('provider.errUploadFailed'), 'error');
         return;
       }
-      console.log('[before-photo] storage upload succeeded', { url });
+      console.log('[before-photo] storage upload succeeded', { path });
 
-      // 3. Save the URL via edge function (re-checks ownership + status).
+      // 3. Save the raw path via edge function (re-checks ownership + status).
       const { data: saveData, error: saveError } = await supabase.functions.invoke('job-progress', {
         body: {
           booking_id: displayBooking.id,
           action: 'save_before_photo',
-          photo_url: url,
+          photo_url: path,
         },
       });
       if (saveError || !saveData) {
@@ -1702,8 +1703,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         before_photo_url?: string | null;
         after_photo_url?: string | null;
       } | null;
-      const confirmedUrl = confirmedJob?.before_photo_url ?? null;
-      if (!confirmedUrl) {
+      const confirmedPath = confirmedJob?.before_photo_url ?? null;
+      if (!confirmedPath) {
         setPhotoError(t('provider.errConfirmPhoto'));
         showToast(t('provider.errConfirmPhoto'), 'error');
         return;
@@ -1715,15 +1716,16 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           status: confirmedJob.status ?? '',
           provider_id: confirmedJob.provider_id ?? '',
           booking_id: displayBooking.id,
-          before_photo_url: confirmedUrl,
+          before_photo_url: confirmedPath,
           after_photo_url: confirmedJob?.after_photo_url ?? null,
           provider_closed_at: null,
         });
       }
 
       setPhotoUploaded(true);
-      setPhotoPreview(confirmedUrl);
-      console.log('[before-photo] workflow advanced', { confirmedUrl });
+      const signedPreview = await createJobImageSignedUrl(confirmedPath);
+      setPhotoPreview(signedPreview);
+      console.log('[before-photo] workflow advanced', { confirmedPath });
       showToast(t('provider.successBeforeSaved'), 'success');
     } catch (err) {
       const e = err as { code?: string; message?: string };
@@ -1921,25 +1923,25 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
 
       // 2. Upload to Storage using {userId}/{jobId}/after-{ts}.{ext}
-      const { url, path, error: uploadErr } = await uploadJobPhoto(
+      const { path, error: uploadErr } = await uploadJobPhoto(
         profile.id,
         jobId,
         afterPhotoFile,
         'after',
       );
-      if (uploadErr || !url) {
+      if (uploadErr || !path) {
         console.error('[after-photo] storage upload failed:', { error: uploadErr, path });
         setAfterPhotoError(uploadErr ?? t('provider.errUploadFailed'));
         showToast(t('provider.errUploadFailed'), 'error');
         return;
       }
 
-      // 3. Save the URL via edge function (re-checks ownership + status).
+      // 3. Save the raw path via edge function (re-checks ownership + status).
       const { data: saveData, error: saveError } = await supabase.functions.invoke('job-progress', {
         body: {
           booking_id: displayBooking.id,
           action: 'save_after_photo',
-          photo_url: url,
+          photo_url: path,
         },
       });
       if (saveError || !saveData) {
@@ -1982,8 +1984,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         before_photo_url?: string | null;
         after_photo_url?: string | null;
       } | null;
-      const confirmedUrl = confirmedJob?.after_photo_url ?? null;
-      if (!confirmedUrl) {
+      const confirmedPath = confirmedJob?.after_photo_url ?? null;
+      if (!confirmedPath) {
         setAfterPhotoError(t('provider.errConfirmPhoto'));
         showToast(t('provider.errConfirmPhoto'), 'error');
         return;
@@ -1996,13 +1998,14 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           provider_id: confirmedJob.provider_id ?? '',
           booking_id: displayBooking.id,
           before_photo_url: confirmedJob.before_photo_url ?? null,
-          after_photo_url: confirmedUrl,
+          after_photo_url: confirmedPath,
           provider_closed_at: null,
         });
       }
 
       setAfterPhotoUploaded(true);
-      setAfterPhotoPreview(confirmedUrl);
+      const signedPreview = await createJobImageSignedUrl(confirmedPath);
+      setAfterPhotoPreview(signedPreview);
       showToast(t('provider.successAfterSaved'), 'success');
     } catch (err) {
       const e = err as { code?: string; message?: string };

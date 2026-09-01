@@ -77,7 +77,6 @@ async function resizeImage(file: File): Promise<File> {
 }
 
 export interface SupportPhotoUploadResult {
-  url: string | null;
   path: string | null;
   error: string | null;
 }
@@ -108,6 +107,5 @@ export async function uploadSupportPhoto(
     return { url: null, path: null, error: uploadError.message };
   }
 
-  const { data } = supabase.storage.from('job-images').getPublicUrl(path);
-  return { url: data.publicUrl, path, error: null };
+  return { path, error: null };
 }

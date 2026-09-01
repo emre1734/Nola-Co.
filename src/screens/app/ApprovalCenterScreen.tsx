@@ -15,6 +15,7 @@ import { PhotoViewer, BeforeAfterCompare } from '../../components/PhotoViewer';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
+import { createJobImageSignedUrl } from '../../lib/job-image-resolver';
 import { colors, spacing, typography, radii } from '../../theme';
 import { useTranslation } from '../../i18n/useTranslation';
 
@@ -74,7 +75,12 @@ export function ApprovalCenterScreen({ onBack, onSignOut }: ApprovalCenterScreen
         return;
       }
       const result = data as { success?: boolean; jobs?: ApprovalJob[] };
-      setJobs(result.jobs ?? []);
+      const jobs = result.jobs ?? [];
+      for (const j of jobs) {
+        j.before_photo_url = await createJobImageSignedUrl(j.before_photo_url);
+        j.after_photo_url = await createJobImageSignedUrl(j.after_photo_url);
+      }
+      setJobs(jobs);
       setSubmittedIds(prev => {
         const next = { ...prev };
         for (const j of result.jobs ?? []) {

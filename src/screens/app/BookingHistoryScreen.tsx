@@ -13,6 +13,7 @@ import { PhotoViewer } from '../../components/PhotoViewer';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
+import { createJobImageSignedUrl } from '../../lib/job-image-resolver';
 import { colors, spacing, typography, radii } from '../../theme';
 import { useTranslation } from '../../i18n/useTranslation';
 
@@ -105,7 +106,12 @@ export function BookingHistoryScreen({ onBack }: BookingHistoryScreenProps) {
       setJobs([]);
     } else {
       const result = data as { success?: boolean; jobs?: HistoryJob[] };
-      setJobs(result.jobs ?? []);
+      const jobs = result.jobs ?? [];
+      for (const j of jobs) {
+        j.before_photo_url = await createJobImageSignedUrl(j.before_photo_url);
+        j.after_photo_url = await createJobImageSignedUrl(j.after_photo_url);
+      }
+      setJobs(jobs);
     }
   }, []);
 
