@@ -83,7 +83,7 @@ export function CompleteProfileScreen({ role, onComplete }: CompleteProfileScree
         avatarUrl = url;
       }
 
-      const { error: upsertError } = await supabase.from('profiles').upsert({
+      const { error: upsertError } = await supabase.from('profiles').insert({
         id: session.user.id,
         full_name: fullName.trim(),
         phone: phone.trim(),

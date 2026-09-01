@@ -77,16 +77,11 @@ export function ProviderOnboardingScreen({ onComplete }: ProviderOnboardingScree
       avatarUrl = url;
     }
 
-    // Upsert profile
-    const { error: profileError } = await supabase.from('profiles').upsert({
-      id: session.user.id,
-      full_name: fullName.trim(),
-      phone: phone.trim(),
-      email: session.user.email,
-      role: 'provider',
-      ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
-      updated_at: new Date().toISOString(),
-    });
+    // Update existing profile row to provider role
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({ role: 'provider', updated_at: new Date().toISOString() })
+      .eq('id', session.user.id);
 
     if (profileError) {
       showToast(t('onboarding.provider.errSaveProfile') + profileError.message, 'error');
