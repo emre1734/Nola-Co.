@@ -240,6 +240,7 @@ export const tr = {
     cancelSuccess: 'Rezervasyon iptal edildi.',
     cancelNotCancellable: 'Wash Partner yola çıktığı için bu rezervasyon artık iptal edilemez.',
     cancelError: 'Rezervasyon iptal edilemedi. Lütfen tekrar deneyin.',
+    errCheckingProvider: 'Sağlayıcı durumu doğrulanamadı. Lütfen tekrar deneyin.',
     cancelling: 'İptal ediliyor…',
     logoutTitle: 'Çıkış Yap',
     logoutMessage: 'Hesabınızdan çıkmak istiyor musunuz?',

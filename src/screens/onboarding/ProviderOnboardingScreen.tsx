@@ -89,8 +89,20 @@ export function ProviderOnboardingScreen({ onComplete }: ProviderOnboardingScree
       return;
     }
 
-    // Insert provider profile
-    const { error: providerError } = await supabase.from('provider_profiles').upsert({
+    // Insert or update provider profile (no upsert — check existence first)
+    const { data: existingProvider, error: checkError } = await supabase
+      .from('provider_profiles')
+      .select('id')
+      .eq('profile_id', session.user.id)
+      .maybeSingle();
+
+    if (checkError) {
+      showToast(t('onboarding.provider.errSaveProvider') + checkError.message, 'error');
+      setLoading(false);
+      return;
+    }
+
+    const providerPayload = {
       profile_id: session.user.id,
       bio: bio.trim(),
       service_radius: radius,
@@ -99,7 +111,21 @@ export function ProviderOnboardingScreen({ onComplete }: ProviderOnboardingScree
       working_days: workingDays,
       work_start_time: startTime,
       work_end_time: endTime,
-    });
+    };
+
+    let providerError: { message: string } | null = null;
+    if (existingProvider) {
+      const { error } = await supabase
+        .from('provider_profiles')
+        .update(providerPayload)
+        .eq('profile_id', session.user.id);
+      providerError = error;
+    } else {
+      const { error } = await supabase
+        .from('provider_profiles')
+        .insert(providerPayload);
+      providerError = error;
+    }
 
     setLoading(false);
 

@@ -240,6 +240,7 @@ export const en = {
     cancelSuccess: 'Reservation cancelled.',
     cancelNotCancellable: 'This reservation can no longer be cancelled because the Wash Partner has started travelling.',
     cancelError: 'Could not cancel the reservation. Please try again.',
+    errCheckingProvider: 'Could not verify provider status. Please try again.',
     cancelling: 'Cancelling…',
     logoutTitle: 'Sign Out',
     logoutMessage: 'Are you sure you want to sign out?',

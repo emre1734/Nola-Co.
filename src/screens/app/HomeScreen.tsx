@@ -63,12 +63,16 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
   const handleEarnTap = async () => {
     if (!profile) return;
     setCheckingProvider(true);
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('provider_profiles')
       .select('id')
       .eq('profile_id', profile.id)
       .maybeSingle();
     setCheckingProvider(false);
+    if (error) {
+      showToast(t('home.errCheckingProvider'), 'error');
+      return;
+    }
     if (data) {
       onNavigate('providerDashboard');
     } else {

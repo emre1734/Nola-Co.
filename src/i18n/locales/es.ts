@@ -240,6 +240,7 @@ export const es = {
     cancelSuccess: 'Reserva cancelada.',
     cancelNotCancellable: 'Esta reserva ya no se puede cancelar porque el Socio de Lavado ha empezado a viajar.',
     cancelError: 'No se pudo cancelar la reserva. Por favor reinténtalo.',
+    errCheckingProvider: 'No se pudo verificar el estado del proveedor. Por favor reinténtalo.',
     cancelling: 'Cancelando…',
     logoutTitle: 'Cerrar Sesión',
     logoutMessage: '¿Estás seguro de que quieres cerrar sesión?',
