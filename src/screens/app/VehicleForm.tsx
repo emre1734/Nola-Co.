@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
 import { uploadVehicleImage, pickImageWeb } from '../../lib/vehicle';
+import { createVehicleImageSignedUrl } from '../../lib/vehicle-image-resolver';
 import { colors, spacing, typography, radii } from '../../theme';
 import { useTranslation } from '../../i18n/useTranslation';
 
@@ -46,9 +47,15 @@ export function VehicleForm({ vehicle, onSaved, onCancel }: VehicleFormProps) {
   const [color, setColor] = useState(vehicle?.color ?? '');
   const [plate, setPlate] = useState(vehicle?.plate ?? '');
   const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(vehicle?.image_url ?? null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (vehicle?.image_url) {
+      createVehicleImageSignedUrl(vehicle.image_url).then(setImagePreview);
+    }
+  }, [vehicle?.image_url]);
 
   const pickVehicleImage = async () => {
     const file = await pickImageWeb();
@@ -74,15 +81,15 @@ export function VehicleForm({ vehicle, onSaved, onCancel }: VehicleFormProps) {
 
     setLoading(true);
 
-    let imageUrl = vehicle?.image_url ?? null;
+    let imagePath = vehicle?.image_url ?? null;
     if (imageFile) {
-      const { url, error } = await uploadVehicleImage(session.user.id, imageFile);
+      const { path, error } = await uploadVehicleImage(session.user.id, imageFile);
       if (error) {
         showToast(t('vehicles.form.errImageUpload') + error, 'error');
         setLoading(false);
         return;
       }
-      imageUrl = url;
+      imagePath = path;
     }
 
     const payload = {
@@ -92,7 +99,7 @@ export function VehicleForm({ vehicle, onSaved, onCancel }: VehicleFormProps) {
       vehicle_type: vehicleType,
       color: color.trim() || null,
       plate: plate.trim(),
-      image_url: imageUrl,
+      image_url: imagePath,
       updated_at: new Date().toISOString(),
     };
 

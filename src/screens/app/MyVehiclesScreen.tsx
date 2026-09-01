@@ -13,6 +13,7 @@ import { Modal } from '../../components/ui/Modal';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
+import { createVehicleImageSignedUrl } from '../../lib/vehicle-image-resolver';
 import { colors, spacing, typography, radii } from '../../theme';
 import { VehicleForm, VehicleData } from './VehicleForm';
 import { useTranslation } from '../../i18n/useTranslation';
@@ -49,7 +50,13 @@ export function MyVehiclesScreen({ onBack, onSignOut }: MyVehiclesScreenProps) {
       showToast(t('vehicles.errLoad'), 'error');
       return;
     }
-    setVehicles((data as Vehicle[]) ?? []);
+    const vehicles = (data as Vehicle[]) ?? [];
+    for (const v of vehicles) {
+      if (v.image_url) {
+        v.image_url = await createVehicleImageSignedUrl(v.image_url);
+      }
+    }
+    setVehicles(vehicles);
   }, [showToast]);
 
   useEffect(() => {

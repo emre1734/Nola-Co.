@@ -13,6 +13,7 @@ import { LegalInfoScreen, AcceptanceCheckbox, type LegalSection } from '../../co
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
+import { createVehicleImageSignedUrl } from '../../lib/vehicle-image-resolver';
 import { colors, spacing, typography, radii } from '../../theme';
 import { GoogleMapView } from '../../components/map/GoogleMapView';
 import { DateTimePicker } from '../../components/DateTimePicker';
@@ -155,7 +156,13 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
       showToast(t('booking.errLoadData'), 'error');
       return;
     }
-    setVehicles((vData as Vehicle[]) ?? []);
+    const vehicles = (vData as Vehicle[]) ?? [];
+    for (const v of vehicles) {
+      if (v.image_url) {
+        v.image_url = await createVehicleImageSignedUrl(v.image_url);
+      }
+    }
+    setVehicles(vehicles);
     setServices((sData as Service[]) ?? []);
   }, [showToast]);
 
