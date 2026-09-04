@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.wishwash.app',
+  appId: 'com.nolaco.wishwashapp',
   appName: 'WishWash',
   webDir: 'dist',
 };

@@ -1,4 +1,4 @@
-package com.wishwash.app;
+package com.nolaco.wishwashapp;
 
 import com.getcapacitor.BridgeActivity;
 
