@@ -72,6 +72,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (data.user && !data.user.email_confirmed_at) {
       return { error: null, emailNotVerified: true };
     }
+    if (error && /email not confirmed|not confirmed/i.test(error.message)) {
+      return { error: null, emailNotVerified: true };
+    }
     return { error: error?.message ?? null };
   };
 
