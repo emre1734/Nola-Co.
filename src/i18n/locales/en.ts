@@ -109,6 +109,8 @@ export const en = {
     },
     verification: {
       verifyPrompt: 'Please verify your email address before signing in.',
+      signUpSuccess: 'We sent a verification link to your email. You can sign in after verifying your email.',
+      emailNotVerifiedSignIn: 'Please verify your email address first.',
       blockedTitle: 'Email Not Verified',
       blockedBody: 'Your email address has not been verified yet.',
       resendButton: 'Resend Verification Email',

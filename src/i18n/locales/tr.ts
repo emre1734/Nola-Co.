@@ -109,6 +109,8 @@ export const tr = {
     },
     verification: {
       verifyPrompt: 'Giriş yapmadan önce lütfen e-posta adresinizi doğrulayın.',
+      signUpSuccess: 'Doğrulama bağlantısını e-posta adresinize gönderdik. E-postanızı doğruladıktan sonra giriş yapabilirsiniz.',
+      emailNotVerifiedSignIn: 'Önce e-posta adresinizi doğrulayın.',
       blockedTitle: 'E-posta Doğrulanmadı',
       blockedBody: 'E-posta adresiniz henüz doğrulanmadı.',
       resendButton: 'Doğrulama E-postasını Tekrar Gönder',

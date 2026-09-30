@@ -114,7 +114,8 @@ export function RegisterScreen({ onNavigate, onSuccess }: RegisterScreenProps) {
     } else if (session) {
       onSuccess(email.trim().toLowerCase());
     } else {
-      showToast(t('common.notAuthenticated'), 'error');
+      showToast(t('auth.verification.signUpSuccess'), 'success');
+      onNavigate('login');
     }
   };
 

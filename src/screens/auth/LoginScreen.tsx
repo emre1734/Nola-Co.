@@ -108,7 +108,7 @@ export function LoginScreen({ onNavigate, onSuccess }: LoginScreenProps) {
               Wish<Text style={styles.brandAccent}>Wash</Text>
             </Text>
             <Text style={styles.title}>{t('auth.verification.blockedTitle')}</Text>
-            <Text style={styles.subtitle}>{t('auth.verification.blockedBody')}</Text>
+            <Text style={styles.subtitle}>{t('auth.verification.emailNotVerifiedSignIn')}</Text>
           </View>
 
           <View style={styles.form}>

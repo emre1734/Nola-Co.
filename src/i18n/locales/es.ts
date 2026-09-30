@@ -109,6 +109,8 @@ export const es = {
     },
     verification: {
       verifyPrompt: 'Por favor verifica tu correo electrónico antes de iniciar sesión.',
+      signUpSuccess: 'Enviamos un enlace de verificación a tu correo. Puedes iniciar sesión después de verificar tu correo.',
+      emailNotVerifiedSignIn: 'Por favor verifica tu correo electrónico primero.',
       blockedTitle: 'Correo No Verificado',
       blockedBody: 'Tu correo electrónico aún no ha sido verificado.',
       resendButton: 'Reenviar Correo de Verificación',

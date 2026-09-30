@@ -66,8 +66,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (data.session) {
       const profile = await fetchProfile(data.session.user.id);
       setState(prev => ({ ...prev, session: data.session, profile, loading: false }));
-    } else {
-      setState(prev => ({ ...prev, loading: false }));
+      return { error: null };
+    }
+    setState(prev => ({ ...prev, loading: false }));
+    if (data.user && !data.user.email_confirmed_at) {
+      return { error: null, emailNotVerified: true };
     }
     return { error: error?.message ?? null };
   };
