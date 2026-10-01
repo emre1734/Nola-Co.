@@ -14,6 +14,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import { supabase } from '../../lib/supabase';
 import { uploadAvatar, pickImageWeb } from '../../lib/avatar';
+import { normalizeTRPhone } from '../../lib/phone';
 import { colors, spacing, typography, radii } from '../../theme';
 import { useTranslation } from '../../i18n/useTranslation';
 
@@ -45,6 +46,7 @@ export function CustomerOnboardingScreen({ onComplete }: CustomerOnboardingScree
     const errs: Record<string, string> = {};
     if (!fullName.trim()) errs.fullName = t('onboarding.profile.errFullNameRequired');
     if (!phone.trim()) errs.phone = t('onboarding.profile.errPhoneRequired');
+    else if (!normalizeTRPhone(phone)) errs.phone = t('onboarding.profile.errPhoneInvalid');
     if (!city.trim()) errs.city = t('onboarding.profile.errCityRequired');
     return errs;
   };
@@ -83,7 +85,7 @@ export function CustomerOnboardingScreen({ onComplete }: CustomerOnboardingScree
       const { error: insertError } = await supabase.from('profiles').upsert({
         id: session.user.id,
         full_name: fullName.trim(),
-        phone: phone.trim(),
+        phone: normalizeTRPhone(phone),
         email: session.user.email,
         city: city.trim(),
         ...(avatarUrl ? { avatar_url: avatarUrl } : {}),

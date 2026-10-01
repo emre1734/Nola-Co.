@@ -22,6 +22,7 @@ import {
 } from '../lib/support-photo';
 import { colors, spacing, typography, radii } from '../theme';
 import { useTranslation } from '../i18n/useTranslation';
+import { normalizeTRPhone } from '../lib/phone';
 
 export const PROBLEM_CATEGORIES = [
   'Vehicle was not cleaned properly',
@@ -92,7 +93,7 @@ export function SupportRequestForm({
 
   const descLen = description.trim().length;
   const descValid = descLen >= DESC_MIN && descLen <= DESC_MAX;
-  const phoneValid = phone.trim().length > 0;
+  const phoneValid = normalizeTRPhone(phone) !== null;
   const canSubmit = !!category && descValid && phoneValid && !submitting && !!bookingId;
 
   const handlePickPhoto = async () => {
@@ -182,7 +183,7 @@ export function SupportRequestForm({
           booking_id: bookingId,
           category,
           description: description.trim(),
-          phone: phone.trim(),
+          phone: normalizeTRPhone(phone) ?? phone.trim(),
           photo_urls: photoUrls,
         },
       });

@@ -16,6 +16,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { useTranslation } from '../../i18n/useTranslation';
 import { supabase } from '../../lib/supabase';
 import { uploadAvatar, pickImageWeb } from '../../lib/avatar';
+import { normalizeTRPhone } from '../../lib/phone';
 import { colors, spacing, typography, radii } from '../../theme';
 
 interface ProviderOnboardingScreenProps {
@@ -52,6 +53,7 @@ export function ProviderOnboardingScreen({ onComplete }: ProviderOnboardingScree
     const errs: Record<string, string> = {};
     if (!fullName.trim()) errs.fullName = t('onboarding.provider.errFullNameRequired');
     if (!phone.trim()) errs.phone = t('onboarding.provider.errPhoneRequired');
+    else if (!normalizeTRPhone(phone)) errs.phone = t('onboarding.provider.errPhoneInvalid');
     if (!bio.trim()) errs.bio = t('onboarding.provider.errBioRequired');
     if (workingDays.length === 0) errs.availability_days = t('availability.errDaysRequired');
     if (endTime <= startTime) errs.availability_time = t('availability.errEndBeforeStart');
@@ -80,7 +82,7 @@ export function ProviderOnboardingScreen({ onComplete }: ProviderOnboardingScree
     // Update existing profile row to provider role
     const { error: profileError } = await supabase
       .from('profiles')
-      .update({ role: 'provider', updated_at: new Date().toISOString() })
+      .update({ role: 'provider', phone: normalizeTRPhone(phone), full_name: fullName.trim(), updated_at: new Date().toISOString() })
       .eq('id', session.user.id);
 
     if (profileError) {

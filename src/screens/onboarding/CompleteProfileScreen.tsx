@@ -15,6 +15,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { useTranslation } from '../../i18n/useTranslation';
 import { supabase } from '../../lib/supabase';
 import { uploadAvatar, pickImageWeb } from '../../lib/avatar';
+import { normalizeTRPhone } from '../../lib/phone';
 import { colors, spacing, typography } from '../../theme';
 
 interface CompleteProfileScreenProps {
@@ -47,7 +48,7 @@ export function CompleteProfileScreen({ role, onComplete }: CompleteProfileScree
     if (!fullName.trim()) errs.fullName = t('onboarding.profile.errFullNameRequired');
     else if (fullName.trim().length < 2) errs.fullName = t('onboarding.profile.errNameShort');
     if (!phone.trim()) errs.phone = t('onboarding.profile.errPhoneRequired');
-    else if (phone.trim().length < 7) errs.phone = t('onboarding.profile.errPhoneInvalid');
+    else if (!normalizeTRPhone(phone)) errs.phone = t('onboarding.profile.errPhoneInvalid');
     if (!city.trim()) errs.city = t('onboarding.profile.errCityRequired');
     return errs;
   };
@@ -86,7 +87,7 @@ export function CompleteProfileScreen({ role, onComplete }: CompleteProfileScree
       const { error: upsertError } = await supabase.from('profiles').insert({
         id: session.user.id,
         full_name: fullName.trim(),
-        phone: phone.trim(),
+        phone: normalizeTRPhone(phone),
         city: city.trim(),
         email: session.user.email,
         role,
