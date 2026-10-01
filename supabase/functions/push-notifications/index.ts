@@ -276,6 +276,16 @@ const NOTIFICATION_TEMPLATES: Record<string, Record<string, { title: string; bod
     tr: { title: "Servis İncelemesi Gerekli", body: "Müşteri tamamlanan servisle ilgili bir sorun bildirdi." },
     es: { title: "Revisión de Servicio Requerida", body: "El cliente reportó un problema con el servicio completado." },
   },
+  wash_started: {
+    en: { title: "Wash Started", body: "Your vehicle's wash has started." },
+    tr: { title: "Yıkama Başladı", body: "Aracınızın yıkaması başladı." },
+    es: { title: "Lavado Iniciado", body: "El lavado de tu vehículo ha comenzado." },
+  },
+  booking_cancelled: {
+    en: { title: "Reservation Cancelled", body: "The reservation has been cancelled." },
+    tr: { title: "Rezervasyon İptal Edildi", body: "Rezervasyon iptal edildi." },
+    es: { title: "Reserva Cancelada", body: "La reserva ha sido cancelada." },
+  },
 };
 
 function getNotificationContent(
@@ -548,43 +558,35 @@ Deno.serve(async (req: Request) => {
         console.log("dispatch_booking_wave_one result:", dispatchResult);
       }
 
-      // Find eligible providers: role=provider, notifications enabled,
-      // has location, and is "available" or "online".
-      let providerQuery = supabase
-        .from("profiles")
-        .select("id, notification_language, latitude, longitude")
-        .eq("role", "provider")
-        .neq("notifications_enabled", false)
-        .not("latitude", "is", null)
-        .not("longitude", "is", null);
+      // Use the same eligibility RPC that the dispatch engine uses.
+      // This ensures push notifications only go to providers who are
+      // actually eligible to accept the booking — same 5km radius,
+      // same availability/verification/working-hours/schedule-conflict
+      // checks. The RPC uses profiles.latitude/longitude (permanent
+      // onboarding location), NOT live GPS coordinates.
+      const { data: eligibleProviders, error: eligibleError } = await supabase
+        .rpc("find_eligible_providers", { p_booking_id: booking_id });
 
-      const { data: providers, error: providersError } = await providerQuery;
-
-      if (providersError || !providers || providers.length === 0) {
+      if (eligibleError || !eligibleProviders || eligibleProviders.length === 0) {
         return new Response(
           JSON.stringify({ success: true, sent: 0, reason: "no_eligible_providers" }),
           { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
       }
 
-      // Filter by distance if booking has coordinates
-      const MAX_DISTANCE_KM = 50;
-      const eligibleProviders = booking.latitude != null && booking.longitude != null
-        ? providers.filter((p) => {
-            if (p.latitude == null || p.longitude == null) return false;
-            const dist = haversineKm(
-              booking.latitude!, booking.longitude!,
-              p.latitude, p.longitude,
-            );
-            return dist <= MAX_DISTANCE_KM;
-          })
-        : providers;
+      // find_eligible_providers returns provider_profiles.id values.
+      // Map them to auth user ids (profile_id) for push delivery.
+      const providerIds = eligibleProviders.map(
+        (p: { provider_id: string; approximate_distance_km: number; rank: number }) => p.provider_id,
+      );
+      const { data: providerProfiles } = await supabase
+        .from("provider_profiles")
+        .select("id, profile_id")
+        .in("id", providerIds);
 
-      if (eligibleProviders.length === 0) {
-        return new Response(
-          JSON.stringify({ success: true, sent: 0, reason: "no_nearby_providers" }),
-          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
+      const profileIdByPpId: Record<string, string> = {};
+      for (const pp of providerProfiles ?? []) {
+        if (pp.profile_id) profileIdByPpId[pp.id] = pp.profile_id;
       }
 
       // Get VAPID keys
@@ -604,17 +606,19 @@ Deno.serve(async (req: Request) => {
       const bookingTime = booking.booking_time ?? "";
       let totalSent = 0;
 
-      for (const provider of eligibleProviders) {
+      for (const ep of eligibleProviders) {
+        const profileId = profileIdByPpId[ep.provider_id];
+        if (!profileId) continue;
         const result = await sendToUser(
           supabase,
-          provider.id,
+          profileId,
           "new_booking",
           { booking_date: bookingDate, booking_time: bookingTime },
           "providerDashboard",
           booking_id,
           pubKeyRow.value,
           privKeyRow.value,
-          provider.notification_language,
+          null,
         );
         totalSent += result.sent;
       }
@@ -671,6 +675,102 @@ Deno.serve(async (req: Request) => {
         notification_type,
         params,
         screen,
+        booking_id,
+        pubKeyRow.value,
+        privKeyRow.value,
+        null,
+      );
+
+      return new Response(
+        JSON.stringify({ success: true, sent: result.sent, reason: result.reason ?? null }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // ============================================================
+    // notify_cancellation: send a booking_cancelled push to the
+    // non-cancelling party. Called after a successful cancel_booking
+    // RPC. The caller is the cancelling party (identified by their
+    // auth uid); the recipient is the other side. Fire-and-forget
+    // from the caller's perspective — push failure does not undo
+    // the cancellation.
+    // ============================================================
+    if (action === "notify_cancellation") {
+      const { booking_id } = body as { booking_id: string };
+      if (!booking_id) {
+        return new Response(
+          JSON.stringify({ error: "booking_id is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const { data: cancelBooking, error: cancelBookingError } = await supabase
+        .from("bookings")
+        .select("id, customer_id, provider_id, status")
+        .eq("id", booking_id)
+        .maybeSingle();
+
+      if (cancelBookingError || !cancelBooking) {
+        return new Response(
+          JSON.stringify({ error: "Booking not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      if (cancelBooking.status !== "cancelled") {
+        return new Response(
+          JSON.stringify({ error: "Booking is not cancelled" }),
+          { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Determine recipient: the party that did NOT cancel.
+      let targetUserId: string | null = null;
+      let targetScreen: string | null = null;
+
+      if (userId === cancelBooking.customer_id) {
+        // Customer cancelled → notify the assigned provider (if any).
+        if (cancelBooking.provider_id) {
+          const { data: ppRow } = await supabase
+          .from("provider_profiles")
+          .select("profile_id")
+          .eq("id", cancelBooking.provider_id)
+          .maybeSingle();
+          targetUserId = ppRow?.profile_id ?? null;
+          targetScreen = "providerDashboard";
+        }
+      } else {
+        // Provider cancelled → notify the customer.
+        targetUserId = cancelBooking.customer_id;
+        targetScreen = null;
+      }
+
+      if (!targetUserId) {
+        return new Response(
+          JSON.stringify({ success: true, sent: 0, reason: "no_recipient" }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Get VAPID keys
+      const [{ data: pubKeyRow }, { data: privKeyRow }] = await Promise.all([
+        supabase.from("app_secrets").select("value").eq("key", "vapid_public_key").maybeSingle(),
+        supabase.from("app_secrets").select("value").eq("key", "vapid_private_key").maybeSingle(),
+      ]);
+
+      if (!pubKeyRow?.value || !privKeyRow?.value) {
+        return new Response(
+          JSON.stringify({ error: "VAPID keys not configured" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const result = await sendToUser(
+        supabase,
+        targetUserId,
+        "booking_cancelled",
+        {},
+        targetScreen,
         booking_id,
         pubKeyRow.value,
         privKeyRow.value,

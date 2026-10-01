@@ -909,7 +909,7 @@ Deno.serve(async (req: Request) => {
     if (action === "start_wash") {
       const { data: startBooking, error: startBookingError } = await supabase
         .from("bookings")
-        .select("id, status, provider_id")
+        .select("id, status, provider_id, customer_id")
         .eq("id", booking_id)
         .maybeSingle();
 
@@ -991,6 +991,14 @@ Deno.serve(async (req: Request) => {
         return new Response(
           JSON.stringify({ error: "Wash start could not be verified" }),
           { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Notify the customer that the wash has started. Fire-and-forget.
+      if (startBooking.customer_id) {
+        sendPushNotification(
+          supabaseUrl, serviceRoleKey,
+          startBooking.customer_id, "wash_started", "partnerSelection", booking_id,
         );
       }
 

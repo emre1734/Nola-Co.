@@ -218,6 +218,11 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
         setJobPhase('accepted');
         setShowCancelConfirm(false);
         showToast(t('home.cancelSuccess'), 'success');
+        // Notify the assigned provider that the booking was cancelled.
+        // Fire-and-forget — push failure does not undo the cancellation.
+        supabase.functions.invoke('push-notifications', {
+          body: { action: 'notify_cancellation', booking_id: activeBooking.id },
+        }).catch((err) => console.error('Cancel push failed:', err));
       } else if (result?.error === 'not_cancellable') {
         setShowCancelConfirm(false);
         showToast(t('home.cancelNotCancellable'), 'error');
