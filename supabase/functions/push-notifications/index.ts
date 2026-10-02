@@ -493,6 +493,91 @@ Deno.serve(async (req: Request) => {
     }
 
     // ============================================================
+    // register_fcm_token: save a native Android FCM registration token
+    // for the authenticated user. The FCM token is stored in the
+    // `endpoint` column with platform='android'. p256dh_key and auth_key
+    // are NULL for FCM tokens (they are Web Push only). Upsert on
+    // (user_id, endpoint) prevents duplicates; token refresh creates a
+    // new endpoint so the old row is left behind and cleaned up later.
+    // ============================================================
+    if (action === "register_fcm_token") {
+      const { token: fcmToken, role } = body as {
+        token?: string;
+        role?: string;
+      };
+
+      if (!fcmToken) {
+        return new Response(
+          JSON.stringify({ error: "token is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      let userRole = role;
+      if (!userRole) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", userId)
+          .maybeSingle();
+        userRole = profile?.role ?? "customer";
+      }
+
+      const { error: upsertError } = await supabase
+        .from("notification_tokens")
+        .upsert(
+          {
+            user_id: userId,
+            role: userRole,
+            platform: "android",
+            endpoint: fcmToken,
+            p256dh_key: null,
+            auth_key: null,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id,endpoint" },
+        );
+
+      if (upsertError) {
+        return new Response(
+          JSON.stringify({ error: "Failed to register FCM token" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ success: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // ============================================================
+    // unregister_fcm_token: remove a native FCM token (e.g. on sign-out).
+    // Only deletes the matching endpoint for the current user — other
+    // devices' tokens are preserved.
+    // ============================================================
+    if (action === "unregister_fcm_token") {
+      const { token: fcmToken } = body as { token?: string };
+      if (!fcmToken) {
+        return new Response(
+          JSON.stringify({ error: "token is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      await supabase
+        .from("notification_tokens")
+        .delete()
+        .eq("user_id", userId)
+        .eq("endpoint", fcmToken)
+        .eq("platform", "android");
+
+      return new Response(
+        JSON.stringify({ success: true }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // ============================================================
     // get_vapid_public_key: return the public VAPID key for the frontend
     // ============================================================
     if (action === "get_vapid_public_key") {

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { Session } from '@supabase/supabase-js';
+import { Capacitor } from '@capacitor/core';
 import { supabase, Profile } from '../lib/supabase';
 
 interface AuthState {
@@ -90,6 +91,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    // On native, unregister the FCM token before the session is lost.
+    // Only removes this device's token — other devices keep theirs.
+    if (Capacitor.isNativePlatform() && state.session) {
+      try {
+        const fcmToken = localStorage.getItem('wishwash:fcm-token');
+        if (fcmToken) {
+          await supabase.functions.invoke('push-notifications', {
+            body: { action: 'unregister_fcm_token', token: fcmToken },
+          });
+          localStorage.removeItem('wishwash:fcm-token');
+        }
+      } catch {
+        // Safe to ignore — stale token will be cleaned by invalid-token sweep.
+      }
+    }
     await supabase.auth.signOut();
     setState(prev => ({ ...prev, session: null, profile: null }));
   };
