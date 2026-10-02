@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "76296510180",
+    "project_id": "wishwash-d4137",
+    "storage_bucket": "wishwash-d4137.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:76296510180:android:0bd40a28ff229de547aaf1",
+        "android_client_info": {
+          "package_name": "com.nolaco.wishwashapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC7cbIqKxgccac-17aBCwrrQAYRbv0iI5U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
