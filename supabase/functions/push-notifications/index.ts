@@ -320,6 +320,187 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
 }
 
 // ============================================================
+// Firebase Service Account parsing + Google OAuth2 access token
+// ============================================================
+
+let cachedServiceAccount: { project_id: string; client_email: string; private_key: string } | null = null;
+let cachedOAuthToken: { token: string; expiresAt: number } | null = null;
+
+function getParsedServiceAccount(): { project_id: string; client_email: string; private_key: string } | null {
+  if (cachedServiceAccount) return cachedServiceAccount;
+  const raw = Deno.env.get("FIREBASE_SERVICE_ACCOUNT");
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed.project_id || !parsed.client_email || !parsed.private_key) {
+      return null;
+    }
+    cachedServiceAccount = {
+      project_id: parsed.project_id,
+      client_email: parsed.client_email,
+      private_key: parsed.private_key,
+    };
+    return cachedServiceAccount;
+  } catch {
+    return null;
+  }
+}
+
+function pemToPkcs8Bytes(pem: string): ArrayBuffer {
+  const b64 = pem.replace(/-----[^-]+-----/g, "").replace(/\s/g, "");
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+async function getGoogleOAuth2Token(): Promise<{ token: string; project_id: string } | null> {
+  const sa = getParsedServiceAccount();
+  if (!sa) return null;
+
+  if (cachedOAuthToken && Date.now() < cachedOAuthToken.expiresAt) {
+    return { token: cachedOAuthToken.token, project_id: sa.project_id };
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: "RS256", typ: "JWT" };
+  const payload = {
+    iss: sa.client_email,
+    scope: "https://www.googleapis.com/auth/firebase.messaging",
+    aud: "https://oauth2.googleapis.com/token",
+    iat: now,
+    exp: now + 3600,
+  };
+
+  const enc = new TextEncoder();
+  const headerB64 = base64UrlEncode(enc.encode(JSON.stringify(header)));
+  const payloadB64 = base64UrlEncode(enc.encode(JSON.stringify(payload)));
+  const unsigned = `${headerB64}.${payloadB64}`;
+
+  let cryptoKey: CryptoKey;
+  try {
+    cryptoKey = await crypto.subtle.importKey(
+      "pkcs8",
+      pemToPkcs8Bytes(sa.private_key),
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+  } catch {
+    console.error("Failed to import Firebase service account private key");
+    return null;
+  }
+
+  const signature = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    cryptoKey,
+    enc.encode(unsigned),
+  );
+
+  const signedJwt = `${unsigned}.${base64UrlEncode(signature)}`;
+
+  try {
+    const res = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${signedJwt}`,
+    });
+
+    if (!res.ok) {
+      console.error("OAuth2 token request failed:", res.status);
+      return null;
+    }
+
+    const data = await res.json();
+    if (!data.access_token) {
+      console.error("OAuth2 response missing access_token");
+      return null;
+    }
+
+    cachedOAuthToken = {
+      token: data.access_token,
+      expiresAt: Date.now() + 50 * 60 * 1000,
+    };
+    return { token: data.access_token, project_id: sa.project_id };
+  } catch {
+    console.error("OAuth2 token request error");
+    return null;
+  }
+}
+
+// ============================================================
+// Send a single FCM HTTP v1 message to an Android device
+// ============================================================
+
+async function sendFcmMessage(
+  fcmToken: string,
+  payload: { title: string; body: string; screen: string | null; booking_id: string | null; notification_type: string },
+  oauthToken: string,
+  projectId: string,
+): Promise<{ ok: boolean; status: number; shouldDelete: boolean }> {
+  try {
+    const data: Record<string, string> = {
+      title: payload.title,
+      body: payload.body,
+      notification_type: payload.notification_type,
+    };
+    if (payload.screen) data.screen = payload.screen;
+    if (payload.booking_id) data.booking_id = payload.booking_id;
+
+    const message = {
+      message: {
+        token: fcmToken,
+        notification: {
+          title: payload.title,
+          body: payload.body,
+        },
+        data,
+      },
+    };
+
+    const res = await fetch(
+      `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${oauthToken}`,
+        },
+        body: JSON.stringify(message),
+      },
+    );
+
+    if (res.ok) {
+      return { ok: true, status: 200, shouldDelete: false };
+    }
+
+    let errorBody: { error?: { code?: number; message?: string; status?: string } } = {};
+    try { errorBody = await res.json(); } catch { /* non-JSON error body */ }
+
+    const errorMsg = errorBody.error?.message ?? "";
+    const errorStatus = errorBody.error?.status ?? "";
+
+    if (errorStatus === "UNREGISTERED" || /UNREGISTERED/i.test(errorMsg)) {
+      return { ok: false, status: res.status, shouldDelete: true };
+    }
+
+    if (errorStatus === "INVALID_ARGUMENT" || /INVALID_ARGUMENT/i.test(errorMsg)) {
+      if (/registration token|token/i.test(errorMsg) && !/payload|message|data|notification/i.test(errorMsg)) {
+        return { ok: false, status: res.status, shouldDelete: true };
+      }
+      console.error(`FCM INVALID_ARGUMENT (not token-related): status=${res.status}`);
+      return { ok: false, status: res.status, shouldDelete: false };
+    }
+
+    console.error(`FCM send failed: status=${res.status} code=${errorStatus}`);
+    return { ok: false, status: res.status, shouldDelete: false };
+  } catch (err) {
+    console.error("FCM send error:", err);
+    return { ok: false, status: 0, shouldDelete: false };
+  }
+}
+
+// ============================================================
 // Helper: send a notification to a single user (all their devices)
 // ============================================================
 async function sendToUser(
@@ -329,11 +510,10 @@ async function sendToUser(
   params: Record<string, string>,
   screen: string | null,
   bookingId: string | null,
-  vapidPublicKey: string,
-  vapidPrivateKey: string,
+  vapidPublicKey: string | null,
+  vapidPrivateKey: string | null,
   languageOverride: string | null,
 ): Promise<{ sent: number; reason?: string }> {
-  // Check if user has notifications enabled
   const { data: profile } = await supabase
     .from("profiles")
     .select("notifications_enabled, notification_language")
@@ -345,7 +525,7 @@ async function sendToUser(
 
   const { data: tokens } = await supabase
     .from("notification_tokens")
-    .select("endpoint, p256dh_key, auth_key")
+    .select("endpoint, p256dh_key, auth_key, platform")
     .eq("user_id", targetUserId);
 
   if (!tokens || tokens.length === 0) return { sent: 0, reason: "no_tokens" };
@@ -360,15 +540,43 @@ async function sendToUser(
     notification_type: notificationType,
   };
 
+  const webTokens = tokens.filter((t) => t.platform === "web");
+  const androidTokens = tokens.filter((t) => t.platform === "android");
+  const unknownTokens = tokens.filter((t) => t.platform !== "web" && t.platform !== "android");
+
+  if (unknownTokens.length > 0) {
+    console.error(`Skipping ${unknownTokens.length} token(s) with unknown platform`);
+  }
+
   let sent = 0;
   const invalidEndpoints: string[] = [];
 
-  for (const token of tokens) {
-    const result = await sendPushMessage(token, payload, vapidPublicKey, vapidPrivateKey);
-    if (result.ok) {
-      sent++;
-    } else if (result.shouldDelete) {
-      invalidEndpoints.push(token.endpoint);
+  if (webTokens.length > 0 && vapidPublicKey && vapidPrivateKey) {
+    for (const token of webTokens) {
+      const result = await sendPushMessage(token, payload, vapidPublicKey, vapidPrivateKey);
+      if (result.ok) {
+        sent++;
+      } else if (result.shouldDelete) {
+        invalidEndpoints.push(token.endpoint);
+      }
+    }
+  } else if (webTokens.length > 0) {
+    console.error("Web push tokens exist but VAPID keys not configured — skipping web push");
+  }
+
+  if (androidTokens.length > 0) {
+    const fcmAuth = await getGoogleOAuth2Token();
+    if (fcmAuth) {
+      for (const token of androidTokens) {
+        const result = await sendFcmMessage(token.endpoint, payload, fcmAuth.token, fcmAuth.project_id);
+        if (result.ok) {
+          sent++;
+        } else if (result.shouldDelete) {
+          invalidEndpoints.push(token.endpoint);
+        }
+      }
+    } else {
+      console.error("Android FCM tokens exist but FIREBASE_SERVICE_ACCOUNT not configured — skipping FCM");
     }
   }
 
@@ -674,18 +882,14 @@ Deno.serve(async (req: Request) => {
         if (pp.profile_id) profileIdByPpId[pp.id] = pp.profile_id;
       }
 
-      // Get VAPID keys
+      // Get VAPID keys (optional — only needed for web push tokens;
+      // Android FCM uses FIREBASE_SERVICE_ACCOUNT instead)
       const [{ data: pubKeyRow }, { data: privKeyRow }] = await Promise.all([
         supabase.from("app_secrets").select("value").eq("key", "vapid_public_key").maybeSingle(),
         supabase.from("app_secrets").select("value").eq("key", "vapid_private_key").maybeSingle(),
       ]);
-
-      if (!pubKeyRow?.value || !privKeyRow?.value) {
-        return new Response(
-          JSON.stringify({ error: "VAPID keys not configured" }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
+      const vapidPublicKey = pubKeyRow?.value ?? null;
+      const vapidPrivateKey = privKeyRow?.value ?? null;
 
       const bookingDate = booking.booking_date ?? "";
       const bookingTime = booking.booking_time ?? "";
@@ -701,8 +905,8 @@ Deno.serve(async (req: Request) => {
           { booking_date: bookingDate, booking_time: bookingTime },
           "providerDashboard",
           booking_id,
-          pubKeyRow.value,
-          privKeyRow.value,
+          vapidPublicKey,
+          vapidPrivateKey,
           null,
         );
         totalSent += result.sent;
@@ -741,18 +945,14 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Get VAPID keys
+      // Get VAPID keys (optional — only needed for web push tokens;
+      // Android FCM uses FIREBASE_SERVICE_ACCOUNT instead)
       const [{ data: pubKeyRow }, { data: privKeyRow }] = await Promise.all([
         supabase.from("app_secrets").select("value").eq("key", "vapid_public_key").maybeSingle(),
         supabase.from("app_secrets").select("value").eq("key", "vapid_private_key").maybeSingle(),
       ]);
-
-      if (!pubKeyRow?.value || !privKeyRow?.value) {
-        return new Response(
-          JSON.stringify({ error: "VAPID keys not configured" }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
+      const vapidPublicKey = pubKeyRow?.value ?? null;
+      const vapidPrivateKey = privKeyRow?.value ?? null;
 
       const result = await sendToUser(
         supabase,
@@ -761,8 +961,8 @@ Deno.serve(async (req: Request) => {
         params,
         screen,
         booking_id,
-        pubKeyRow.value,
-        privKeyRow.value,
+        vapidPublicKey,
+        vapidPrivateKey,
         null,
       );
 
@@ -837,18 +1037,14 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Get VAPID keys
+      // Get VAPID keys (optional — only needed for web push tokens;
+      // Android FCM uses FIREBASE_SERVICE_ACCOUNT instead)
       const [{ data: pubKeyRow }, { data: privKeyRow }] = await Promise.all([
         supabase.from("app_secrets").select("value").eq("key", "vapid_public_key").maybeSingle(),
         supabase.from("app_secrets").select("value").eq("key", "vapid_private_key").maybeSingle(),
       ]);
-
-      if (!pubKeyRow?.value || !privKeyRow?.value) {
-        return new Response(
-          JSON.stringify({ error: "VAPID keys not configured" }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
-      }
+      const vapidPublicKey = pubKeyRow?.value ?? null;
+      const vapidPrivateKey = privKeyRow?.value ?? null;
 
       const result = await sendToUser(
         supabase,
@@ -857,8 +1053,8 @@ Deno.serve(async (req: Request) => {
         {},
         targetScreen,
         booking_id,
-        pubKeyRow.value,
-        privKeyRow.value,
+        vapidPublicKey,
+        vapidPrivateKey,
         null,
       );
 
