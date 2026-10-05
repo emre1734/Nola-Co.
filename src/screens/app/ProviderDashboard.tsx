@@ -2259,7 +2259,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Text style={styles.statValue}>{stats?.completed_jobs ?? 0}</Text>
+            <Text style={styles.statValue}>{membershipStatus?.completed_jobs ?? stats?.completed_jobs ?? 0}</Text>
             <Text style={styles.statLabel}>{t('provider.statCompleted')}</Text>
           </View>
           <View style={[styles.statCard, styles.statCardBorder]}>
@@ -3041,7 +3041,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
               profileId={profile.id}
               initialEquipment={stats?.equipment ?? []}
               initialPrice={stats?.service_price ?? 450}
-              completedJobs={stats?.completed_jobs ?? 0}
+              completedJobs={membershipStatus?.completed_jobs ?? stats?.completed_jobs ?? 0}
               onUpdated={fetchData}
             />
           )}
