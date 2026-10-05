@@ -44,6 +44,18 @@ interface ProviderStats {
   service_price?: number | null;
 }
 
+interface MembershipStatus {
+  completed_jobs: number;
+  free_jobs_limit: number;
+  free_jobs_remaining: number;
+  membership_required: boolean;
+  membership_active: boolean;
+  membership_state: string | null;
+  membership_expiry_time: string | null;
+  auto_renew: boolean | null;
+  can_receive_jobs: boolean;
+}
+
 interface RecentJob {
   id: string;
   status: string;
@@ -216,6 +228,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const [rejectConfirmId, setRejectConfirmId] = useState<string | null>(null);
   const [rejectedBookingIds, setRejectedBookingIds] = useState<Set<string>>(new Set());
   const [acceptedBooking, setAcceptedBooking] = useState<BookingRequest | null>(null);
+  const [membershipStatus, setMembershipStatus] = useState<MembershipStatus | null>(null);
   const [providerMissing, setProviderMissing] = useState(false);
   const [multiJobError, setMultiJobError] = useState(false);
   const [onMyWayUpdating, setOnMyWayUpdating] = useState(false);
@@ -499,6 +512,20 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
 
     setTodayEarnings(todayTotal);
     setWeekEarnings(weekTotal);
+
+    // Fetch membership/entitlement status from the safe RPC.
+    // This derives completed_jobs from the jobs table (authoritative) and
+    // checks provider_subscriptions for active membership.
+    try {
+      const { data: memData, error: memError } = await supabase
+        .rpc('get_my_partner_membership_status');
+      if (!memError && memData) {
+        const mem = memData as MembershipStatus;
+        setMembershipStatus(mem);
+      }
+    } catch {
+      // Non-critical — dashboard still works without membership status
+    }
 
     return (providerData as { id: string }).id;
   };
@@ -1042,6 +1069,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
         showToast(t('provider.errOfferExpired'), 'error');
       } else if (errMsg === 'offer_not_found') {
         showToast(t('provider.errBookingGone'), 'error');
+      } else if (errMsg === 'membership_required') {
+        showToast(t('provider.errMembershipRequired'), 'error');
       } else {
         showToast(t('provider.errAcceptFailed'), 'error');
       }
@@ -1792,6 +1821,10 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     );
   }, [requests, displayBooking, activeJob]);
 
+  // Membership lock: provider has 3+ completed jobs and no active membership.
+  // New job requests are hidden, but active jobs and profile remain accessible.
+  const membershipLocked = !!membershipStatus && membershipStatus.membership_required && !membershipStatus.membership_active;
+
   useEffect(() => {
     const requestIds = requests.map(r => r.id);
     const visibleIds = visibleRequests.map(r => r.id);
@@ -2241,6 +2274,44 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           </View>
         </View>
 
+        {/* Membership / Free starter jobs banner */}
+        {membershipStatus && !membershipStatus.membership_required && (
+          <View style={styles.trialBanner}>
+            <Text style={styles.trialBannerTitle}>{t('provider.membershipPartnerTitle')}</Text>
+            <Text style={styles.trialBannerBody}>
+              {t('provider.membershipFreeStarter')}: {t('provider.membershipFreeStarterCount', { completed: String(membershipStatus.completed_jobs) })}
+            </Text>
+          </View>
+        )}
+
+        {/* Paywall card: provider has 3+ completed jobs and no active membership */}
+        {membershipStatus && membershipStatus.membership_required && !membershipStatus.membership_active && (
+          <View style={styles.paywallCard}>
+            <Text style={styles.paywallTitle}>{t('provider.membershipPartnerTitle')}</Text>
+            <Text style={styles.paywallBody}>{t('provider.membershipFreeComplete')}</Text>
+            <Text style={styles.paywallSubBody}>{t('provider.membershipFreeCompleteBody')}</Text>
+            <Text style={styles.paywallRequired}>{t('provider.membershipRequired')}</Text>
+            <View style={styles.paywallCtaDisabled}>
+              <Text style={styles.paywallCtaText}>{t('provider.membershipActivateCta')}</Text>
+            </View>
+          </View>
+        )}
+
+        {/* Membership active banner */}
+        {membershipStatus && membershipStatus.membership_active && (
+          <View style={styles.membershipActiveBanner}>
+            <Text style={styles.membershipActiveTitle}>{t('provider.membershipPartnerTitle')}</Text>
+            <Text style={styles.membershipActiveStatus}>{t('provider.membershipActive')}</Text>
+            {membershipStatus.membership_expiry_time && (
+              <Text style={styles.membershipActiveExpiry}>
+                {membershipStatus.auto_renew === false
+                  ? t('provider.membershipActiveUntil', { date: new Date(membershipStatus.membership_expiry_time).toLocaleDateString() })
+                  : t('provider.membershipNextRenewal', { date: new Date(membershipStatus.membership_expiry_time).toLocaleDateString() })}
+              </Text>
+            )}
+          </View>
+        )}
+
         {/* Accepted booking confirmation */}
         {displayBooking && (
           <View style={styles.acceptedCard}>
@@ -2579,7 +2650,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           </View>
         )}
 
-        {online && (
+        {online && !membershipLocked && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t('provider.pendingTitle')}</Text>
             {requestsLoading ? (
@@ -3688,4 +3759,48 @@ const styles = StyleSheet.create({
   jobEarning: { ...typography.body, fontWeight: '700', color: colors.accent },
   jobStatus: { borderRadius: radii.full, paddingVertical: 3, paddingHorizontal: 10 },
   jobStatusText: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
+  trialBanner: {
+    backgroundColor: colors.primary + '12',
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.primary + '30',
+  },
+  trialBannerTitle: { ...typography.body, fontWeight: '700', color: colors.primary, marginBottom: 4 },
+  trialBannerBody: { ...typography.bodySmall, color: colors.textSecondary },
+  paywallCard: {
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radii.xl,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+    borderWidth: 1.5,
+    borderColor: colors.warning + '50',
+  },
+  paywallTitle: { ...typography.h3, color: colors.textPrimary, marginBottom: spacing.sm },
+  paywallBody: { ...typography.body, fontWeight: '600', color: colors.textPrimary, marginBottom: 4 },
+  paywallSubBody: { ...typography.bodySmall, color: colors.textSecondary, marginBottom: spacing.md },
+  paywallRequired: { ...typography.bodySmall, color: colors.textSecondary, marginBottom: spacing.md, lineHeight: 20 },
+  paywallCtaDisabled: {
+    backgroundColor: colors.border,
+    borderRadius: radii.lg,
+    paddingVertical: spacing.md - 2,
+    alignItems: 'center',
+  },
+  paywallCtaText: { color: colors.textMuted, fontSize: 15, fontWeight: '700' },
+  membershipActiveBanner: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.success + '12',
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.success + '40',
+  },
+  membershipActiveTitle: { ...typography.body, fontWeight: '700', color: colors.success },
+  membershipActiveStatus: { ...typography.bodySmall, fontWeight: '700', color: colors.success },
+  membershipActiveExpiry: { ...typography.bodySmall, color: colors.textSecondary, flexBasis: '100%' },
 });
