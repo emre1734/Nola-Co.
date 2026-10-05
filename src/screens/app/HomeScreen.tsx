@@ -17,6 +17,7 @@ import { colors, spacing, typography, radii } from '../../theme';
 import { useTranslation } from '../../i18n/useTranslation';
 import { WasherTrackingMap } from '../../components/WasherTrackingMap';
 import { localizeServiceName } from '../../lib/service-i18n';
+import { reverseGeocode, type ReverseGeocodeResult } from '../../lib/google-maps';
 
 interface ActiveBooking {
   id: string;
@@ -56,6 +57,8 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
   const [cancelling, setCancelling] = useState(false);
   const activeBookingRef = useRef<ActiveBooking | null>(null);
   activeBookingRef.current = activeBooking;
+  const [addressLabel, setAddressLabel] = useState<string | null>(null);
+  const lastGeocodedKeyRef = useRef<string | null>(null);
 
   const handleWashTap = () => {
     onNavigate('booking');
@@ -202,6 +205,54 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
     return () => clearInterval(interval);
   }, [activeBooking, fetchActiveBooking]);
 
+  // Resolve a human-readable address for the location card. Only re-geocodes
+  // when coordinates change beyond a ~111m threshold (3 decimal places) to
+  // avoid redundant API calls from minor GPS jitter. Coordinates remain the
+  // source of truth — the address is purely a display label.
+  useEffect(() => {
+    const effectiveCoords = coordinates ??
+      (profile?.latitude != null && profile?.longitude != null
+        ? { latitude: profile.latitude, longitude: profile.longitude }
+        : null);
+
+    if (!effectiveCoords) {
+      setAddressLabel(null);
+      lastGeocodedKeyRef.current = null;
+      return;
+    }
+
+    const geocodeKey = `${effectiveCoords.latitude.toFixed(3)},${effectiveCoords.longitude.toFixed(3)}`;
+    if (geocodeKey === lastGeocodedKeyRef.current) return;
+    lastGeocodedKeyRef.current = geocodeKey;
+
+    setAddressLabel(null);
+
+    let cancelled = false;
+    reverseGeocode(effectiveCoords.latitude, effectiveCoords.longitude)
+      .then((result: ReverseGeocodeResult) => {
+        if (cancelled) return;
+        const locParts = [result.district, result.city].filter(Boolean);
+        const uniqueLocs = locParts.filter((p, i) => locParts.indexOf(p) === i);
+        const locStr = uniqueLocs.join(' / ');
+        let label: string;
+        if (result.street && locStr) {
+          label = `${result.street}, ${locStr}`;
+        } else if (result.street) {
+          label = result.street;
+        } else if (locStr) {
+          label = locStr;
+        } else {
+          label = result.fullAddress;
+        }
+        setAddressLabel(label);
+      })
+      .catch(() => {
+        if (cancelled) return;
+      });
+
+    return () => { cancelled = true; };
+  }, [coordinates, profile?.latitude, profile?.longitude]);
+
   const handleCancelBooking = async () => {
     if (!activeBooking || cancelling) return;
     setCancelling(true);
@@ -281,6 +332,11 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
     return '✓';
   };
 
+  const displayCoords = coordinates ??
+    (profile?.latitude != null && profile?.longitude != null
+      ? { latitude: profile.latitude, longitude: profile.longitude }
+      : null);
+
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -319,11 +375,9 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
           <View style={styles.locationBody}>
             <Text style={styles.locationLabel}>{t('home.locationLabel')}</Text>
             <Text style={styles.locationValue} numberOfLines={1}>
-              {coordinates != null
-                ? `${coordinates.latitude.toFixed(4)}, ${coordinates.longitude.toFixed(4)}`
-                : profile?.latitude != null && profile?.longitude != null
-                  ? `${profile.latitude.toFixed(4)}, ${profile.longitude.toFixed(4)}`
-                  : t('home.locationSet')}
+              {displayCoords != null
+                ? (addressLabel ?? `${displayCoords.latitude.toFixed(4)}, ${displayCoords.longitude.toFixed(4)}`)
+                : t('home.locationSet')}
             </Text>
           </View>
           <Text style={styles.locationArrow}>›</Text>
