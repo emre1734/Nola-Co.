@@ -20,6 +20,7 @@ import { DateTimePicker } from '../../components/DateTimePicker';
 import type { ReverseGeocodeResult } from '../../lib/google-maps';
 import { useTranslation } from '../../i18n/useTranslation';
 import { WasherTrackingMap } from '../../components/WasherTrackingMap';
+import { localizeServiceName, localizeServiceDescription } from '../../lib/service-i18n';
 
 interface BookingScreenProps {
   onBack: () => void;
@@ -487,10 +488,10 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
                   activeOpacity={0.85}
                 >
                   <View style={styles.serviceHeader}>
-                    <Text style={styles.serviceName}>{svc.name}</Text>
+                    <Text style={styles.serviceName}>{localizeServiceName(svc.name, t)}</Text>
                     <Text style={styles.servicePrice}>₺{Number(svc.base_price)}</Text>
                   </View>
-                  {svc.description && <Text style={styles.serviceDesc}>{svc.description}</Text>}
+                  {svc.description && <Text style={styles.serviceDesc}>{localizeServiceDescription(svc.description, t)}</Text>}
                   <View style={styles.serviceMeta}>
                     <Text style={styles.serviceDuration}>{t('booking.durationPrefix')}{svc.estimated_duration ?? 60} {t('booking.minSuffix')}</Text>
                     <View style={[styles.radio, selectedService?.id === svc.id && styles.radioActive]}>
@@ -613,7 +614,7 @@ export function BookingScreen({ onBack, onComplete }: BookingScreenProps) {
               <Text style={styles.summaryLabel}>{t('booking.summaryService')}</Text>
               {selectedService ? (
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryValue}>{selectedService.name}</Text>
+                  <Text style={styles.summaryValue}>{localizeServiceName(selectedService.name, t)}</Text>
                   <Text style={styles.summaryPrice}>₺{Number(selectedService.base_price)}</Text>
                 </View>
               ) : (

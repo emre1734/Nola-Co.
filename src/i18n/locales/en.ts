@@ -559,6 +559,18 @@ export const en = {
     extraCeramicSpray: 'Ceramic Spray',
     extraSeatCleaning: 'Seat Cleaning',
     extraEngineCleaning: 'Engine Cleaning',
+    serviceName: {
+      exteriorWash: 'Exterior Wash',
+      interiorWash: 'Interior Wash',
+      interiorExteriorWash: 'Interior + Exterior Wash',
+      detailing: 'Detailing',
+    },
+    serviceDesc: {
+      exteriorCleaning: 'Exterior Cleaning',
+      interiorCleaning: 'Interior Cleaning',
+      completeWash: 'Complete Wash',
+      professionalDetailing: 'Professional Detailing',
+    },
     legal: {
       serviceInfoTitle: 'Service Information',
       legalEyebrow: 'Legal & Trust',

@@ -559,6 +559,18 @@ export const es = {
     extraCeramicSpray: 'Spray Cerámico',
     extraSeatCleaning: 'Limpieza de Asientos',
     extraEngineCleaning: 'Limpieza de Motor',
+    serviceName: {
+      exteriorWash: 'Lavado Exterior',
+      interiorWash: 'Lavado Interior',
+      interiorExteriorWash: 'Interior + Exterior',
+      detailing: 'Detallado',
+    },
+    serviceDesc: {
+      exteriorCleaning: 'Limpieza Exterior',
+      interiorCleaning: 'Limpieza Interior',
+      completeWash: 'Lavado Completo',
+      professionalDetailing: 'Detallado Profesional',
+    },
     legal: {
       serviceInfoTitle: 'Información del Servicio',
       legalEyebrow: 'Legal y Confianza',

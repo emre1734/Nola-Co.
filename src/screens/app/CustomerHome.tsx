@@ -15,6 +15,7 @@ import { colors, spacing, typography, radii } from '../../theme';
 import { Modal } from '../../components/ui/Modal';
 import { useTranslation } from '../../i18n/useTranslation';
 import { WasherTrackingMap } from '../../components/WasherTrackingMap';
+import { localizeServiceName, localizeServiceDescription } from '../../lib/service-i18n';
 
 interface CustomerHomeProps {
   onBack: () => void;
@@ -199,7 +200,7 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
               <View style={styles.trackingBody}>
                 <Text style={styles.trackingTitle}>{t('customerHome.activeBookingTitle')}</Text>
                 <Text style={styles.trackingService}>
-                  {(activeBooking.services as any)?.name ?? t('customerHome.washServiceFallback')}
+                  {(activeBooking.services as any)?.name ? localizeServiceName((activeBooking.services as any).name, t) : t('customerHome.washServiceFallback')}
                 </Text>
               </View>
               <View style={[styles.statusBadge, { backgroundColor: colors.primary + '25' }]}>
@@ -243,10 +244,10 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
                   <Text style={styles.servicePrice}>
                     {svc.base_price != null ? `₺${svc.base_price}` : t('customerHome.customPrice')}
                   </Text>
-                  <Text style={styles.serviceName}>{svc.name}</Text>
+                  <Text style={styles.serviceName}>{localizeServiceName(svc.name, t)}</Text>
                   {svc.description && (
                     <Text style={styles.serviceDesc} numberOfLines={2}>
-                      {svc.description}
+                      {localizeServiceDescription(svc.description, t)}
                     </Text>
                   )}
                   {svc.estimated_duration && (
@@ -272,7 +273,7 @@ export function CustomerHome({ onBack, onSignOut }: CustomerHomeProps) {
                 <View key={b.id} style={styles.bookingRow}>
                   <View style={styles.bookingInfo}>
                     <Text style={styles.bookingService}>
-                      {(b.services as any)?.name ?? t('customerHome.washServiceFallback')}
+                      {(b.services as any)?.name ? localizeServiceName((b.services as any).name, t) : t('customerHome.washServiceFallback')}
                     </Text>
                     <Text style={styles.bookingDate}>
                       {b.created_at ? new Date(b.created_at).toLocaleDateString() : ''}

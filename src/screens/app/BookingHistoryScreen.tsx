@@ -16,6 +16,7 @@ import { supabase } from '../../lib/supabase';
 import { createJobImageSignedUrl } from '../../lib/job-image-resolver';
 import { colors, spacing, typography, radii } from '../../theme';
 import { useTranslation } from '../../i18n/useTranslation';
+import { localizeServiceName } from '../../lib/service-i18n';
 
 interface HistoryJob {
   id: string;
@@ -186,7 +187,7 @@ export function BookingHistoryScreen({ onBack }: BookingHistoryScreenProps) {
           ) : (
             <View style={styles.cardList}>
               {upcoming.map(b => {
-                const svcName = b.services?.name ?? t('history.washServiceFallback');
+                const svcName = b.services?.name ? localizeServiceName(b.services.name, t) : t('history.washServiceFallback');
                 const veh = b.vehicles ?? null;
                 return (
                   <View key={b.id} style={styles.upcomingCard}>
@@ -252,7 +253,7 @@ export function BookingHistoryScreen({ onBack }: BookingHistoryScreenProps) {
                       >
                         <View style={styles.cardSummaryLeft}>
                           <Text style={styles.cardTitle}>
-                            {job.service_name ?? t('history.washServiceFallback')}
+                            {job.service_name ? localizeServiceName(job.service_name, t) : t('history.washServiceFallback')}
                           </Text>
                           {job.vehicle && (
                             <Text style={styles.cardSub}>
@@ -302,7 +303,7 @@ export function BookingHistoryScreen({ onBack }: BookingHistoryScreenProps) {
                               <Text style={styles.detailIcon}>🧽</Text>
                               <View style={styles.detailBody}>
                                 <Text style={styles.detailLabel}>{t('history.detailService')}</Text>
-                                <Text style={styles.detailValue}>{job.service_name ?? t('history.washServiceFallback')}</Text>
+                                <Text style={styles.detailValue}>{job.service_name ? localizeServiceName(job.service_name, t) : t('history.washServiceFallback')}</Text>
                               </View>
                             </View>
                             <View style={styles.detailRow}>

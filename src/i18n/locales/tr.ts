@@ -559,6 +559,18 @@ export const tr = {
     extraCeramicSpray: 'Seramik Sprey',
     extraSeatCleaning: 'Koltuk Temizliği',
     extraEngineCleaning: 'Motor Temizliği',
+    serviceName: {
+      exteriorWash: 'Dış Yıkama',
+      interiorWash: 'İç Yıkama',
+      interiorExteriorWash: 'İç + Dış Yıkama',
+      detailing: 'Detaylı Temizlik',
+    },
+    serviceDesc: {
+      exteriorCleaning: 'Dış Temizlik',
+      interiorCleaning: 'İç Temizlik',
+      completeWash: 'Komple Yıkama',
+      professionalDetailing: 'Profesyonel Detaylı Temizlik',
+    },
     legal: {
       serviceInfoTitle: 'Hizmet Bilgileri',
       legalEyebrow: 'Yasal & Güven',

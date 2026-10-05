@@ -16,6 +16,7 @@ import { supabase } from '../../lib/supabase';
 import { colors, spacing, typography, radii } from '../../theme';
 import { useTranslation } from '../../i18n/useTranslation';
 import { WasherTrackingMap } from '../../components/WasherTrackingMap';
+import { localizeServiceName } from '../../lib/service-i18n';
 
 interface ActiveBooking {
   id: string;
@@ -340,7 +341,7 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
               <View style={styles.activeBody}>
                 <Text style={styles.activeTitle}>{t('home.activeReservationTitle')}</Text>
                 <Text style={styles.activeService}>
-                  {(activeBooking.services as any)?.name ?? t('customerHome.washServiceFallback')}
+                  {(activeBooking.services as any)?.name ? localizeServiceName((activeBooking.services as any).name, t) : t('customerHome.washServiceFallback')}
                 </Text>
               </View>
               <View style={[styles.activeBadge, { backgroundColor: phaseColor(jobPhase) + '25' }]}>

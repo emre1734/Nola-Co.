@@ -28,6 +28,7 @@ import { createJobImageSignedUrl } from '../../lib/job-image-resolver';
 import { watchPosition, clearWatch, getCurrentPosition } from '../../lib/native-gps';
 import { useLocation } from '../../contexts/LocationContext';
 import { useTranslation } from '../../i18n/useTranslation';
+import { localizeServiceName, localizeExtraName } from '../../lib/service-i18n';
 
 interface ProviderDashboardProps {
   onBack: () => void;
@@ -2577,7 +2578,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
                     <View style={styles.requestRow}>
                       <Text style={styles.requestIcon}>🧽</Text>
                       <Text style={styles.requestService}>
-                        {req.services?.name ?? t('provider.washServiceFallback')}
+                        {req.services?.name ? localizeServiceName(req.services.name, t) : t('provider.washServiceFallback')}
                       </Text>
                     </View>
 
@@ -2588,7 +2589,7 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
                         <View style={styles.requestExtras}>
                           {req.extra_services.map((extra, idx) => (
                             <Text key={idx} style={styles.requestExtraItem}>
-                              {extra.name} (+₺{extra.price})
+                              {localizeExtraName(extra, t)} (+₺{extra.price})
                             </Text>
                           ))}
                         </View>
