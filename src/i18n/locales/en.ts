@@ -475,7 +475,7 @@ export const en = {
       modelPlaceholder: 'Camry',
       typeLabel: 'Vehicle Type',
       typeSedan: 'Sedan',
-      typeSuv: 'SUV',
+      typeSUV: 'SUV',
       typeHatchback: 'Hatchback',
       typeCoupe: 'Coupe',
       typeTruck: 'Truck',

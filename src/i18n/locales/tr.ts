@@ -475,7 +475,7 @@ export const tr = {
       modelPlaceholder: 'Camry',
       typeLabel: 'Araç Tipi',
       typeSedan: 'Sedan',
-      typeSuv: 'SUV',
+      typeSUV: 'SUV',
       typeHatchback: 'Hatchback',
       typeCoupe: 'Coupe',
       typeTruck: 'Kamyonet',
