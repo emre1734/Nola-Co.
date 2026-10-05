@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { Avatar } from '../../components/ui';
 import { Modal } from '../../components/ui/Modal';
@@ -55,6 +56,8 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
   const [trackingBookingId, setTrackingBookingId] = useState<string | null>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [showCallConfirm, setShowCallConfirm] = useState(false);
+  const [calling, setCalling] = useState(false);
   const activeBookingRef = useRef<ActiveBooking | null>(null);
   activeBookingRef.current = activeBooking;
   const [addressLabel, setAddressLabel] = useState<string | null>(null);
@@ -293,6 +296,33 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
     if (pendingCount > 0) onNavigate('approvalCenter');
   };
 
+  const handleCallConfirm = async () => {
+    if (!activeBooking || calling) return;
+    setCalling(true);
+    try {
+      const { data, error } = await supabase.rpc('get_booking_contact_phone', {
+        p_booking_id: activeBooking.id,
+      });
+      if (error || !data || (data as { phone?: string | null }).phone == null) {
+        showToast(t('home.errContactUnavailable'), 'error');
+        setShowCallConfirm(false);
+        return;
+      }
+      const phone = (data as { phone: string }).phone;
+      if (!phone || phone.trim().length < 5) {
+        showToast(t('home.errContactUnavailable'), 'error');
+        setShowCallConfirm(false);
+        return;
+      }
+      await Linking.openURL(`tel:${phone}`);
+      setShowCallConfirm(false);
+    } catch {
+      showToast(t('home.errCallFailed'), 'error');
+    } finally {
+      setCalling(false);
+    }
+  };
+
   const phaseLabel = (phase: ActiveJobPhase): string => {
     switch (phase) {
       case 'waiting':
@@ -412,6 +442,15 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
                 activeOpacity={0.85}
               >
                 <Text style={styles.activeTrackBtnText}>{t('home.activeTrackBtn')}</Text>
+              </TouchableOpacity>
+            )}
+            {jobPhase !== 'waiting' && activeBooking.provider_id && (
+              <TouchableOpacity
+                style={styles.activeCallBtn}
+                onPress={() => setShowCallConfirm(true)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.activeCallBtnText}>{t('home.callWashPartner')}</Text>
               </TouchableOpacity>
             )}
             {(jobPhase === 'waiting' || jobPhase === 'accepted') && (
@@ -596,6 +635,17 @@ export function HomeScreen({ onNavigate, onSignOut, onUpdateLocation }: HomeScre
         confirmVariant="danger"
       />
 
+      <Modal
+        visible={showCallConfirm}
+        onClose={() => { if (!calling) setShowCallConfirm(false); }}
+        title={t('home.callPrivacyTitle')}
+        message={t('home.callPrivacyMessage')}
+        confirmLabel={calling ? '…' : t('home.callPrivacyConfirm')}
+        cancelLabel={t('home.callPrivacyCancel')}
+        onConfirm={handleCallConfirm}
+        confirmVariant="primary"
+      />
+
       {trackingBookingId && (
         <WasherTrackingMap
           bookingId={trackingBookingId}
@@ -748,6 +798,14 @@ const styles = StyleSheet.create({
     borderColor: colors.error + '50',
   },
   activeCancelBtnText: { color: colors.error, fontWeight: '700', fontSize: 15 },
+  activeCallBtn: {
+    backgroundColor: colors.success,
+    borderRadius: radii.lg,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: spacing.xs,
+  },
+  activeCallBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
 
   card: {
     flexDirection: 'row',

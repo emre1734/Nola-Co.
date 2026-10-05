@@ -251,6 +251,13 @@ export const es = {
     logoutMessage: '¿Estás seguro de que quieres cerrar sesión?',
     logoutConfirm: 'Cerrar Sesión',
     logoutCancel: 'Cancelar',
+    callWashPartner: 'Llamar al Socio de Lavado',
+    callPrivacyTitle: 'Llamada Telefónica',
+    callPrivacyMessage: 'WishWash abrirá tu aplicación de teléfono para contactar a la otra persona. Sus números de teléfono pueden ser visibles entre ustedes a través de la aplicación de teléfono, el historial de llamadas o el identificador de llamadas.',
+    callPrivacyConfirm: 'Continuar a Llamar',
+    callPrivacyCancel: 'Cancelar',
+    errCallFailed: 'No se pudo iniciar la llamada. Inténtalo de nuevo.',
+    errContactUnavailable: 'La información de contacto no está disponible para esta reserva.',
   },
   customerHome: {
     title: '🚗 Lavar',
@@ -442,6 +449,9 @@ export const es = {
     debugAfterUrl: 'after_photo_url: ',
     debugUploadResult: 'resultado subida: ',
     debugNull: 'nulo',
+    callCustomer: 'Llamar al Cliente',
+    errCallFailed: 'No se pudo iniciar la llamada. Inténtalo de nuevo.',
+    errContactUnavailable: 'La información de contacto no está disponible para esta reserva.',
   },
   vehicles: {
     title: 'Mis Vehículos',

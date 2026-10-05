@@ -205,6 +205,8 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
   const [showProfilePanel, setShowProfilePanel] = useState(false);
   const [showWorkingHours, setShowWorkingHours] = useState(false);
   const [showEquipmentPricing, setShowEquipmentPricing] = useState(false);
+  const [showCallConfirm, setShowCallConfirm] = useState(false);
+  const [calling, setCalling] = useState(false);
   const [locationPreview, setLocationPreview] = useState<{ lat: number; lng: number } | null>(null);
   const [requests, setRequests] = useState<BookingRequest[]>([]);
   const [requestsLoading, setRequestsLoading] = useState(false);
@@ -2109,6 +2111,33 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
     onSignOut();
   };
 
+  const handleCallConfirm = async () => {
+    if (!displayBooking || calling) return;
+    setCalling(true);
+    try {
+      const { data, error } = await supabase.rpc('get_booking_contact_phone', {
+        p_booking_id: displayBooking.id,
+      });
+      if (error || !data || (data as { phone?: string | null }).phone == null) {
+        showToast(t('provider.errContactUnavailable'), 'error');
+        setShowCallConfirm(false);
+        return;
+      }
+      const phone = (data as { phone: string }).phone;
+      if (!phone || phone.trim().length < 5) {
+        showToast(t('provider.errContactUnavailable'), 'error');
+        setShowCallConfirm(false);
+        return;
+      }
+      await Linking.openURL(`tel:${phone}`);
+      setShowCallConfirm(false);
+    } catch {
+      showToast(t('provider.errCallFailed'), 'error');
+    } finally {
+      setCalling(false);
+    }
+  };
+
   const hasCoords = displayBooking?.latitude != null && displayBooking?.longitude != null;
   const canViewLocation = hasCoords || !!displayBooking?.address;
 
@@ -2242,6 +2271,17 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
                   ? t('provider.viewAddress')
                   : t('provider.locationUnavailable')}
               </Text>
+            </TouchableOpacity>
+            {/* Call Customer button — available for any accepted booking
+                with an assigned provider. The RPC enforces server-side
+                that the booking is still accepted and the caller is the
+                assigned provider. Phone number is never rendered as text. */}
+            <TouchableOpacity
+              style={styles.callCustomerBtn}
+              onPress={() => setShowCallConfirm(true)}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.callCustomerBtnText}>{t('provider.callCustomer')}</Text>
             </TouchableOpacity>
             {/* On My Way button: only for a newly accepted booking that has
                 NOT yet progressed to a job row. When a genuine active job
@@ -2999,6 +3039,17 @@ export function ProviderDashboard({ onBack, onSignOut }: ProviderDashboardProps)
           </View>
         )}
       </Modal>
+
+      <Modal
+        visible={showCallConfirm}
+        onClose={() => { if (!calling) setShowCallConfirm(false); }}
+        title={t('home.callPrivacyTitle')}
+        message={t('home.callPrivacyMessage')}
+        confirmLabel={calling ? '…' : t('home.callPrivacyConfirm')}
+        cancelLabel={t('home.callPrivacyCancel')}
+        onConfirm={handleCallConfirm}
+        confirmVariant="primary"
+      />
     </View>
   );
 }
@@ -3107,6 +3158,18 @@ const styles = StyleSheet.create({
   },
   viewLocationBtnDisabled: { opacity: 0.5 },
   viewLocationBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  callCustomerBtn: {
+    backgroundColor: colors.success,
+    borderRadius: radii.lg,
+    paddingVertical: spacing.md - 2,
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  callCustomerBtnText: {
     color: '#fff',
     fontSize: 15,
     fontWeight: '700',

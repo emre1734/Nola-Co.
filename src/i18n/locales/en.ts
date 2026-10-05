@@ -251,6 +251,13 @@ export const en = {
     logoutMessage: 'Are you sure you want to sign out?',
     logoutConfirm: 'Sign Out',
     logoutCancel: 'Cancel',
+    callWashPartner: 'Call Wash Partner',
+    callPrivacyTitle: 'Phone Call',
+    callPrivacyMessage: 'WishWash will open your phone app to contact the other person. Your phone numbers may be visible to each other through the phone app, call history, or caller ID.',
+    callPrivacyConfirm: 'Continue to Call',
+    callPrivacyCancel: 'Cancel',
+    errCallFailed: 'Could not start the call. Please try again.',
+    errContactUnavailable: 'Contact information is not available for this booking.',
   },
   customerHome: {
     title: '🚗 Book a Wash',
@@ -442,6 +449,9 @@ export const en = {
     debugAfterUrl: 'after_photo_url: ',
     debugUploadResult: 'upload result: ',
     debugNull: 'null',
+    callCustomer: 'Call Customer',
+    errCallFailed: 'Could not start the call. Please try again.',
+    errContactUnavailable: 'Contact information is not available for this booking.',
   },
   vehicles: {
     title: 'My Vehicles',

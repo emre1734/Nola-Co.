@@ -251,6 +251,13 @@ export const tr = {
     logoutMessage: 'Hesabınızdan çıkmak istiyor musunuz?',
     logoutConfirm: 'Çıkış Yap',
     logoutCancel: 'Vazgeç',
+    callWashPartner: 'Yıkama Ortağını Ara',
+    callPrivacyTitle: 'Telefon Görüşmesi',
+    callPrivacyMessage: 'WishWash, karşı tarafı aramanız için telefon uygulamanızı açacaktır. Telefon numaralarınız telefon uygulaması, arama geçmişi veya arayan kimliği üzerinden birbirinize görünebilir.',
+    callPrivacyConfirm: 'Aramaya Devam Et',
+    callPrivacyCancel: 'Vazgeç',
+    errCallFailed: 'Arama başlatılamadı. Lütfen tekrar deneyin.',
+    errContactUnavailable: 'Bu rezervasyon için iletişim bilgileri kullanılamıyor.',
   },
   customerHome: {
     title: '🚗 Yıkat',
@@ -442,6 +449,9 @@ export const tr = {
     debugAfterUrl: 'after_photo_url: ',
     debugUploadResult: 'yükleme sonucu: ',
     debugNull: 'yok',
+    callCustomer: 'Müşteriyi Ara',
+    errCallFailed: 'Arama başlatılamadı. Lütfen tekrar deneyin.',
+    errContactUnavailable: 'Bu rezervasyon için iletişim bilgileri kullanılamıyor.',
   },
   vehicles: {
     title: 'Araçlarım',
