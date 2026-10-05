@@ -158,6 +158,8 @@ export const es = {
       errCityRequired: 'La ciudad es obligatoria',
       errAvatarUpload: 'Error al subir avatar: ',
       errSaveProfile: 'Error al guardar perfil: ',
+      errSaveFailed: 'No se pudo guardar tu perfil. Inténtalo de nuevo.',
+      errPhoneTaken: 'Este número de teléfono ya está registrado en otra cuenta.',
       successSaved: '¡Perfil guardado! Bienvenido a WishWash.',
     },
     provider: {

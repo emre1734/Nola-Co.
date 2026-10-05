@@ -158,6 +158,8 @@ export const tr = {
       errCityRequired: 'Şehir zorunludur',
       errAvatarUpload: 'Avatar yüklenemedi: ',
       errSaveProfile: 'Profil kaydedilemedi: ',
+      errSaveFailed: 'Profiliniz kaydedilemedi. Lütfen tekrar deneyin.',
+      errPhoneTaken: 'Bu telefon numarası başka bir hesaba kayıtlı.',
       successSaved: 'Profil kaydedildi! WishWash\'e hoş geldiniz.',
     },
     provider: {

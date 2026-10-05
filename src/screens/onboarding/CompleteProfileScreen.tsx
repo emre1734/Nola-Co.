@@ -35,6 +35,7 @@ export function CompleteProfileScreen({ role, onComplete }: CompleteProfileScree
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [formError, setFormError] = useState<string | null>(null);
 
   const pickAvatar = async () => {
     const file = await pickImageWeb();
@@ -70,6 +71,7 @@ export function CompleteProfileScreen({ role, onComplete }: CompleteProfileScree
       return;
     }
 
+    setFormError(null);
     console.log('PROFILE_SAVE_STARTED');
     setLoading(true);
     try {
@@ -78,13 +80,13 @@ export function CompleteProfileScreen({ role, onComplete }: CompleteProfileScree
         const { url, error } = await uploadAvatar(session.user.id, avatarFile);
         if (error) {
           console.log('PROFILE_SAVE_ERROR', 'Avatar: ' + error);
-          showToast(t('onboarding.profile.errAvatarUpload') + error, 'error');
+          setFormError(t('onboarding.profile.errAvatarUpload'));
           return;
         }
         avatarUrl = url;
       }
 
-      const { error: upsertError } = await supabase.from('profiles').insert({
+      const { error: upsertError } = await supabase.from('profiles').upsert({
         id: session.user.id,
         full_name: fullName.trim(),
         phone: normalizeTRPhone(phone),
@@ -93,11 +95,16 @@ export function CompleteProfileScreen({ role, onComplete }: CompleteProfileScree
         role,
         ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
         updated_at: new Date().toISOString(),
-      });
+      }, { onConflict: 'id' });
 
       if (upsertError) {
-        console.log('PROFILE_SAVE_ERROR', upsertError.message);
-        showToast(t('onboarding.profile.errSaveProfile') + upsertError.message, 'error');
+        const msg = upsertError.message ?? '';
+        const code = (upsertError as { code?: string }).code ?? '';
+        if (code === '23505' || /profiles_phone_key|phone.*duplicate|duplicate.*phone/i.test(msg)) {
+          setErrors(prev => ({ ...prev, phone: t('onboarding.profile.errPhoneTaken') }));
+        } else {
+          setFormError(t('onboarding.profile.errSaveFailed'));
+        }
         return;
       }
 
@@ -111,7 +118,7 @@ export function CompleteProfileScreen({ role, onComplete }: CompleteProfileScree
     } catch (err) {
       const e = err as { message?: string };
       console.log('PROFILE_SAVE_ERROR', e?.message ?? 'Unexpected error');
-      showToast(t('onboarding.profile.errSaveProfile') + (e?.message ?? 'Unexpected error'), 'error');
+      setFormError(t('onboarding.profile.errSaveFailed'));
     } finally {
       setLoading(false);
     }
@@ -181,6 +188,10 @@ export function CompleteProfileScreen({ role, onComplete }: CompleteProfileScree
             error={errors.city}
           />
 
+          {formError && (
+            <Text style={styles.formError}>{formError}</Text>
+          )}
+
           <Button
             label={t('onboarding.profile.getStarted')}
             onPress={handleSubmit}
@@ -239,4 +250,11 @@ const styles = StyleSheet.create({
   avatarBadgeText: { color: '#fff', fontWeight: '800', fontSize: 18, lineHeight: 20 },
   form: { width: '100%', maxWidth: 420 },
   cta: { marginTop: spacing.sm },
+  formError: {
+    color: colors.error,
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
 });

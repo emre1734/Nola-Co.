@@ -158,6 +158,8 @@ export const en = {
       errCityRequired: 'City is required',
       errAvatarUpload: 'Avatar upload failed: ',
       errSaveProfile: 'Failed to save profile: ',
+      errSaveFailed: 'Could not save your profile. Please try again.',
+      errPhoneTaken: 'This phone number is already registered to another account.',
       successSaved: 'Profile saved! Welcome to WishWash.',
     },
     provider: {
