@@ -10,5 +10,9 @@
 	{
 		"pkg": "@capacitor/push-notifications",
 		"classpath": "com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin"
+	},
+	{
+		"pkg": "@capgo/native-purchases",
+		"classpath": "ee.forgr.nativepurchases.NativePurchasesPlugin"
 	}
 ]
