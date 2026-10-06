@@ -7,8 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "build:web": "npm run build",
-    "cap:sync:android": "npx cap sync android",
+    "cap:sync:android": "npm run patch:capgo-billing && npx cap sync android",
     "cap:open:android": "npx cap open android",
+    "patch:capgo-billing": "node scripts/patch-capgo-billing.mjs",
+    "postinstall": "node scripts/patch-capgo-billing.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
