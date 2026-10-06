@@ -1,0 +1,134 @@
+[
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/drawable-v24_ic_launcher_foreground.xml.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/drawable-v24/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/drawable-land-xhdpi_splash.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/drawable-land-xhdpi/splash.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/layout_activity_main.xml.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/layout/activity_main.xml"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-xxxhdpi_ic_launcher_foreground.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-xxxhdpi/ic_launcher_foreground.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-xhdpi_ic_launcher_foreground.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-xhdpi/ic_launcher_foreground.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-xhdpi_ic_launcher.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-xhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/drawable-port-xxhdpi_splash.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/drawable-port-xxhdpi/splash.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-xxhdpi_ic_launcher_foreground.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-xxhdpi/ic_launcher_foreground.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/drawable-land-xxxhdpi_splash.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/drawable-land-xxxhdpi/splash.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/xml_file_paths.xml.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/xml/file_paths.xml"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/drawable-land-mdpi_splash.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/drawable-land-mdpi/splash.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/drawable-port-hdpi_splash.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/drawable-port-hdpi/splash.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/drawable_ic_launcher_background.xml.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/drawable/ic_launcher_background.xml"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-xxhdpi_ic_launcher_round.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-xxhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-mdpi_ic_launcher_round.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-mdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-xxxhdpi_ic_launcher_round.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-xxxhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-anydpi-v26/ic_launcher.xml"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-xhdpi_ic_launcher_round.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-xhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-mdpi_ic_launcher.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-mdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-hdpi_ic_launcher_foreground.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-hdpi/ic_launcher_foreground.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-hdpi_ic_launcher_round.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-hdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/drawable-port-mdpi_splash.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/drawable-port-mdpi/splash.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/drawable-land-hdpi_splash.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/drawable-land-hdpi/splash.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-mdpi_ic_launcher_foreground.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-mdpi/ic_launcher_foreground.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/xml_config.xml.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/xml/config.xml"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-xxxhdpi_ic_launcher.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-xxxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-hdpi_ic_launcher.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-hdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/drawable-port-xhdpi_splash.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/drawable-port-xhdpi/splash.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/drawable_splash.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/drawable/splash.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/drawable-port-xxxhdpi_splash.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/drawable-port-xxxhdpi/splash.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-xxhdpi_ic_launcher.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-xxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/mipmap-anydpi-v26/ic_launcher_round.xml"
+    },
+    {
+        "merged": "com.nolaco.wishwashapp-release-54:/drawable-land-xxhdpi_splash.png.flat",
+        "source": "com.nolaco.wishwashapp-main-55:/drawable-land-xxhdpi/splash.png"
+    }
+]
